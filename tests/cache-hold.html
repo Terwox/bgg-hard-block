@@ -38,23 +38,34 @@
       </article>
     </gg-post>
     <script>
+      const earlyState = {};
+
+      setTimeout(() => {
+        earlyState.quoteRemoved = !document.getElementById("cache-held-quote");
+        earlyState.replyPresent = Boolean(document.getElementById("cache-held-reply"));
+        earlyState.ready = document.documentElement.hasAttribute("data-bgg-hard-blocker-ready");
+        earlyState.visibility = getComputedStyle(document.body).visibility;
+      }, 150);
+
       setTimeout(() => {
         const failures = [];
         const check = (condition, message) => {
           if (!condition) failures.push(message);
         };
 
-        check(!document.getElementById("cache-held-quote"), "cached list was not applied before render");
-        check(Boolean(document.getElementById("cache-held-reply")), "allowed reply was removed");
+        check(earlyState.quoteRemoved, "cached list was not applied before render");
+        check(earlyState.replyPresent, "allowed reply was removed");
+        check(!earlyState.ready, "cached data revealed the page before the 500 ms ceiling");
+        check(earlyState.visibility === "hidden", "pre-render hold is not hiding the page");
         check(
-          !document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
-          "cached data revealed the page before live synchronization"
+          document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "page remained hidden after the 500 ms post-load ceiling"
         );
-        check(getComputedStyle(document.body).visibility === "hidden", "pre-render hold is not hiding the page");
+        check(getComputedStyle(document.body).visibility === "visible", "page is not visible after the ceiling");
 
         document.body.dataset.status = failures.length ? "fail" : "pass";
-        document.body.dataset.report = JSON.stringify({ failures });
-      }, 150);
+        document.body.dataset.report = JSON.stringify({ failures, earlyState });
+      }, 650);
     </script>
   </body>
 </html>

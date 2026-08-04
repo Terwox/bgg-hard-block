@@ -1,6 +1,9 @@
 html:not([data-bgg-hard-blocker-ready]) body {
   visibility: hidden !important;
-  animation: bgg-hard-blocker-failsafe 0s linear 6s forwards;
+}
+
+html:not([data-bgg-hard-blocker-ready]):not([data-bgg-hard-blocker-running]) body {
+  animation: bgg-hard-blocker-failsafe 0s linear 2s forwards;
 }
 
 @keyframes bgg-hard-blocker-failsafe {

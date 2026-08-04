@@ -10,7 +10,7 @@ It removes:
 - complete posts authored by anyone on the signed-in user's BGG block list
 - quotations attributed to blocked users while preserving the surrounding reply
 
-The forum body remains hidden until the first filtering pass completes, so blocked content does not flash onscreen. A six-second CSS failsafe prevents a broken extension or changed BGG page from leaving the site permanently blank.
+The forum body remains hidden until the first filtering pass completes, so blocked content does not flash onscreen. Live synchronization can reveal it immediately; otherwise it is revealed no later than 500 ms after `DOMContentLoaded`. A two-second CSS failsafe prevents broken JavaScript or changed BGG markup from leaving the site permanently blank.
 
 ## Install locally
 

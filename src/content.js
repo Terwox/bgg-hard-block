@@ -6,7 +6,8 @@
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
   const STORAGE_KEY = "bggHardBlockerState";
   const READY_ATTRIBUTE = "data-bgg-hard-blocker-ready";
-  const REVEAL_TIMEOUT_MS = 5000;
+  const RUNNING_ATTRIBUTE = "data-bgg-hard-blocker-running";
+  const POST_LOAD_MAX_HOLD_MS = 500;
 
   if (!core || !document.documentElement) {
     return;
@@ -19,6 +20,7 @@
   let domReady = document.readyState !== "loading";
   let hiddenPosts = 0;
   let hiddenQuotes = 0;
+  let revealDeadlineTimer = 0;
   let statusWriteTimer = 0;
   let source = "waiting";
   let lastSync = null;
@@ -44,6 +46,20 @@
     if (domReady && allowReveal) {
       reveal();
     }
+  }
+
+  function scheduleRevealDeadline() {
+    if (revealDeadlineTimer) {
+      return;
+    }
+
+    revealDeadlineTimer = window.setTimeout(() => {
+      if (!document.documentElement.hasAttribute(READY_ATTRIBUTE)) {
+        source = hasBlockList ? source : "timeout";
+        allowReveal = true;
+        reveal();
+      }
+    }, POST_LOAD_MAX_HOLD_MS);
   }
 
   function currentStatus() {
@@ -172,19 +188,15 @@
         domReady = true;
         filter(document);
         revealIfReady();
+        scheduleRevealDeadline();
       },
       { once: true }
     );
   } else {
     filter(document);
     revealIfReady();
+    scheduleRevealDeadline();
   }
 
-  window.setTimeout(() => {
-    if (!document.documentElement.hasAttribute(READY_ATTRIBUTE)) {
-      source = hasBlockList ? source : "timeout";
-      allowReveal = true;
-      reveal();
-    }
-  }, REVEAL_TIMEOUT_MS);
+  document.documentElement.setAttribute(RUNNING_ATTRIBUTE, "");
 })();
