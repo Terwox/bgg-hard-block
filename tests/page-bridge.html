@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Page bridge test</title>
+  </head>
+  <body data-status="running">
+    <script>
+      const calls = [];
+      const responseFor = (url) => {
+        if (url.endsWith("/api/userblock")) return [1001, 42];
+        if (url.endsWith("/api/user/1001")) return { username: "Muted User" };
+        if (url.endsWith("/api/user/42")) return { username: "Another Blocked User" };
+        return { ok: true };
+      };
+
+      window.fetch = async (input, init = {}) => {
+        const url = String(input instanceof Request ? input.url : input);
+        calls.push({ url, headers: new Headers(init.headers || {}) });
+        return new Response(JSON.stringify(responseFor(url)), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      };
+    </script>
+    <script src="../src/page-bridge.js"></script>
+    <script>
+      fetch("https://api.geekdo.com/api/user/549040", {
+        headers: { Authorization: "GeekAuth test-only-token" }
+      });
+      fetch("https://api.geekdo.com/api/thread/123", {
+        headers: { Authorization: "GeekAuth test-only-token" }
+      });
+
+      setTimeout(() => {
+        const failures = [];
+        const element = document.getElementById("bgg-hard-blocker-data");
+        const payload = JSON.parse(element?.getAttribute("content") || "null");
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(payload?.status === "ready", "bridge did not publish a ready state");
+        check(payload?.userIds?.length === 2, "bridge did not return both block IDs");
+        check(payload?.usernames?.includes("Muted User"), "first username was not resolved");
+        check(payload?.usernames?.includes("Another Blocked User"), "second username was not resolved");
+        check(!element?.getAttribute("content").includes("test-only-token"), "auth token leaked into bridge data");
+        check(calls.some((call) => call.url.endsWith("/api/userblock")), "block-list API was not requested");
+        check(
+          calls.filter((call) => call.url.endsWith("/api/userblock")).length === 1,
+          "the same auth token triggered duplicate block-list synchronizations"
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, callCount: calls.length });
+      }, 100);
+    </script>
+  </body>
+</html>

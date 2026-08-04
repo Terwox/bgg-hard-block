@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Content runtime test</title>
+    <meta id="bgg-hard-blocker-data" content='{"status":"ready","usernames":["Muted User"],"unresolved":[],"syncedAt":"2026-08-04T00:00:00.000Z"}'>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      const writes = [];
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerState: {
+                  usernames: ["Muted User"],
+                  status: { lastSync: "2026-08-04T00:00:00.000Z" }
+                }
+              };
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <gg-post id="runtime-placeholder">
+      <article class="post">
+        <div class="post-body"><span>Blocked User</span><button>Show Anyway</button></div>
+      </article>
+    </gg-post>
+    <gg-post id="runtime-reply">
+      <article class="post">
+        <header class="post-header"><a href="/profile/Allowed">Allowed</a></header>
+        <div class="post-body">
+          <gg-markup-quote id="runtime-blocked-quote">
+            <div class="c-header"><span class="user-attribution">Muted User<br>@Muted User</span></div>
+            <gg-markup-content>Blocked content</gg-markup-content>
+          </gg-markup-quote>
+          <p id="runtime-reply-text">Still here</p>
+        </div>
+      </article>
+    </gg-post>
+    <script>
+      setTimeout(() => {
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"), "page was not revealed");
+        check(!document.getElementById("runtime-placeholder"), "placeholder survived runtime filtering");
+        check(!document.getElementById("runtime-blocked-quote"), "blocked quote survived runtime filtering");
+        check(Boolean(document.getElementById("runtime-reply-text")), "reply text was removed");
+        check(writes.length > 0, "runtime status was not written");
+        const status = writes.at(-1)?.bggHardBlockerState?.status;
+        check(status?.hiddenPosts === 1, `expected 1 hidden post, got ${status?.hiddenPosts}`);
+        check(status?.hiddenQuotes === 1, `expected 1 hidden quote, got ${status?.hiddenQuotes}`);
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          stored: writes.at(-1)
+        });
+      }, 150);
+    </script>
+  </body>
+</html>

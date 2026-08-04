@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Muted conversation</title>
+  <rect width="128" height="128" rx="28" fill="#123b5d"/>
+  <path d="M27 31h74a11 11 0 0 1 11 11v39a11 11 0 0 1-11 11H66L43 108V92H27a11 11 0 0 1-11-11V42a11 11 0 0 1 11-11Z" fill="#f7fafc"/>
+  <path d="M31 61h66M31 76h47" fill="none" stroke="#7a8c9b" stroke-linecap="round" stroke-width="8"/>
+  <path d="m22 21 84 86" fill="none" stroke="#e34949" stroke-linecap="round" stroke-width="13"/>
+</svg>

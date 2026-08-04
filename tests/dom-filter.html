@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>DOM filter test</title>
+  </head>
+  <body data-status="running">
+    <main id="fixture">
+      <gg-post id="allowed-with-blocked-quote">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Allowed%20User">Allowed User</a></header>
+          <div class="post-body">
+            <gg-markup-quote id="blocked-quote">
+              <div class="c-header"><span class="user-attribution">Muted User<br>@Muted User</span></div>
+              <gg-markup-content>Blocked quotation</gg-markup-content>
+            </gg-markup-quote>
+            <p id="allowed-reply">The allowed reply survives.</p>
+          </div>
+        </article>
+      </gg-post>
+
+      <gg-post id="blocked-direct-post">
+        <article class="post">
+          <header class="post-header">
+            <meta itemprop="url" content="https://boardgamegeek.com/profile/Muted%20User">
+            <a href="/profile/Muted%20User">Muted User</a>
+          </header>
+          <div class="post-body">Blocked direct post</div>
+        </article>
+      </gg-post>
+
+      <gg-post id="native-placeholder">
+        <article class="post">
+          <div class="post-body">
+            <span>Blocked User</span>
+            <button type="button">Show Anyway</button>
+          </div>
+        </article>
+      </gg-post>
+
+      <gg-post id="allowed-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/AllowedUser">AllowedUser</a></header>
+          <div class="post-body">
+            <gg-markup-quote id="allowed-quote">
+              <div class="c-header"><span class="user-attribution">Someone Else<br>@SomeoneElse</span></div>
+              <gg-markup-content>Allowed quotation</gg-markup-content>
+            </gg-markup-quote>
+          </div>
+        </article>
+      </gg-post>
+    </main>
+
+    <script src="../src/content-core.js"></script>
+    <script>
+      const failures = [];
+      const result = BggHardBlockerCore.filterDom(document, ["Muted User"]);
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+
+      check(result.posts === 2, `expected 2 removed posts, got ${result.posts}`);
+      check(result.quotes === 1, `expected 1 removed quote, got ${result.quotes}`);
+      check(!document.getElementById("blocked-direct-post"), "blocked author's post remains");
+      check(!document.getElementById("native-placeholder"), "native placeholder remains");
+      check(!document.getElementById("blocked-quote"), "blocked quotation remains");
+      check(Boolean(document.getElementById("allowed-with-blocked-quote")), "replying post was removed");
+      check(Boolean(document.getElementById("allowed-reply")), "allowed reply was removed");
+      check(Boolean(document.getElementById("allowed-quote")), "allowed quotation was removed");
+      check(
+        BggHardBlockerCore.usernameFromProfileHref("/profile/Muted%20User") === "muted user",
+        "encoded profile username was not normalized"
+      );
+
+      document.body.dataset.status = failures.length ? "fail" : "pass";
+      document.body.dataset.report = JSON.stringify({ failures, result });
+    </script>
+  </body>
+</html>
