@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BGG Hard Block",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Removes blocked BoardGameGeek forum posts and quotations before they can flash onscreen.",
   "minimum_chrome_version": "111",
   "permissions": [
