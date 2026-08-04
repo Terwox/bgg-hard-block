@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Cached list pre-render hold test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerState: {
+                  usernames: ["Muted User"],
+                  status: { lastSync: "2026-08-04T00:00:00.000Z" }
+                }
+              };
+            },
+            async set() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <gg-post id="cache-held-post">
+      <article class="post">
+        <header class="post-header"><a href="/profile/Allowed">Allowed</a></header>
+        <div class="post-body">
+          <gg-markup-quote id="cache-held-quote">
+            <div class="c-header"><span class="user-attribution">Muted User<br>@Muted User</span></div>
+            <gg-markup-content>Blocked content</gg-markup-content>
+          </gg-markup-quote>
+          <p id="cache-held-reply">Allowed reply</p>
+        </div>
+      </article>
+    </gg-post>
+    <script>
+      setTimeout(() => {
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(!document.getElementById("cache-held-quote"), "cached list was not applied before render");
+        check(Boolean(document.getElementById("cache-held-reply")), "allowed reply was removed");
+        check(
+          !document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "cached data revealed the page before live synchronization"
+        );
+        check(getComputedStyle(document.body).visibility === "hidden", "pre-render hold is not hiding the page");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures });
+      }, 150);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BGG Hard Block</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="../icons/icon-48.png" width="40" height="40" alt="">
+        <div>
+          <h1>BGG Hard Block</h1>
+          <p id="state">Waiting for a BGG forum page</p>
+        </div>
+      </header>
+
+      <dl>
+        <div>
+          <dt>Blocked users</dt>
+          <dd id="blocked-count">—</dd>
+        </div>
+        <div>
+          <dt>Posts removed</dt>
+          <dd id="post-count">—</dd>
+        </div>
+        <div>
+          <dt>Quotes removed</dt>
+          <dd id="quote-count">—</dd>
+        </div>
+      </dl>
+
+      <p class="note">No “show anyway” switch. Blocked content is removed from the page.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
