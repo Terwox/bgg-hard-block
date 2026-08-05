@@ -10,6 +10,10 @@ It removes:
 - complete posts authored by anyone on the signed-in user's BGG block list
 - quotations attributed to blocked users while preserving the surrounding reply
 
+By default, it also adds every BGG Hidden User to BGG's separate user-level
+subscription block list. This is a one-way safety rule: disabling the option stops
+future linking, but does not delete subscription blocks already stored by BGG.
+
 The forum body remains hidden until the first filtering pass completes, so blocked content does not flash onscreen. Live synchronization can reveal it immediately; otherwise it is revealed no later than 500 ms after `DOMContentLoaded`. A two-second CSS failsafe prevents broken JavaScript or changed BGG markup from leaving the site permanently blank.
 
 ## Install locally
@@ -20,13 +24,29 @@ The forum body remains hidden until the first filtering pass completes, so block
 4. Select this repository folder.
 5. Open or reload a BGG forum thread while signed in.
 
-The toolbar popup reports the current block-list count and how many posts and quotations the extension removed on the latest forum page. There is intentionally no “show anyway” override.
+The toolbar popup reports the current block-list count, subscription-link status,
+and how many posts and quotations the extension removed on the latest forum page.
+There is intentionally no “show anyway” override.
+
+Open the extension's **Options** page to disable subscription linking. BGG's own
+Hidden Users editor remains available at
+[`/geekblock/list`](https://boardgamegeek.com/geekblock/list); the extension links
+to it but does not hide or replace it. BGG's separate subscription blocks are at
+[`/subscriptions/blocks?feedType=user`](https://boardgamegeek.com/subscriptions/blocks?feedType=user).
 
 ## How it works
 
 BGG's current frontend requests `https://api.geekdo.com/api/userblock`, which returns the signed-in user's blocked user IDs. A document-start bridge observes the `GeekAuth` request header that BGG itself adds, uses it only in memory to request the block list and public usernames, and never sends it to the isolated content script or saves it.
 
-The isolated content script caches only blocked usernames and status counts in `chrome.storage.local`. A `MutationObserver` applies the same filter to posts loaded dynamically. Profile ID-to-name mappings are cached for 30 days in BGG's own local storage to avoid repeating every public profile request on every page.
+The isolated content script caches only blocked usernames, the subscription-linking
+option, and status counts in `chrome.storage.local`. A `MutationObserver` applies
+the same filter to posts loaded dynamically. Profile ID-to-name mappings are cached
+for 30 days in BGG's own local storage to avoid repeating every public profile
+request on every page.
+
+When subscription linking is enabled, the bridge reads BGG's current user-level
+subscription blocks and sends BGG a `PUT` only for hidden user IDs that are missing.
+It never removes a subscription block.
 
 No browsing data, block list, authentication value, or forum content is sent to a third-party server.
 
@@ -38,7 +58,10 @@ The test suite has no package dependencies. It uses a local headless Chromium in
 ./scripts/test.sh
 ```
 
-It covers native BGG placeholders, full blocked-author posts, blocked quotations inside allowed replies, username normalization, authenticated API bridging, credential non-disclosure, page reveal behavior, and status storage.
+It covers native BGG placeholders, full blocked-author posts, blocked quotations
+inside allowed replies, username normalization, authenticated API bridging,
+credential non-disclosure, default-on and opt-out subscription linking, page reveal
+behavior, and status storage.
 
 An optional networked smoke test loads the unpacked extension into a disposable Chromium profile, seeds a temporary test username, and verifies post and quote removal against a live BGG thread. If BGG gives headless Chromium a Cloudflare challenge, the test keeps the real extension loaded on the BGG origin and substitutes the live markup shape captured during development:
 
@@ -63,5 +86,7 @@ The implementation was checked against BGG's live Angular forum markup on August
 - quotations use `gg-markup-quote` and `.user-attribution`
 - the authenticated block-list endpoint returns numeric user IDs
 - `/api/user/{id}` returns the corresponding public username
+- `/api/blocks?type=user&singular=1` returns user-level subscription blocks
+- `PUT /api/user/{id}/blocks` adds a user-level subscription block
 
 If BGG changes those contracts, native placeholder removal is likely to remain the most resilient behavior, while quote attribution or block-list synchronization may require selector/API updates.

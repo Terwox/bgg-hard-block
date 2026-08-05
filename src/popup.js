@@ -2,16 +2,48 @@
   "use strict";
 
   const STORAGE_KEY = "bggHardBlockerState";
+  const OPTIONS_KEY = "bggHardBlockerOptions";
+  const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
   const elements = {
     blocked: document.getElementById("blocked-count"),
+    options: document.getElementById("open-options"),
     posts: document.getElementById("post-count"),
     quotes: document.getElementById("quote-count"),
-    state: document.getElementById("state")
+    state: document.getElementById("state"),
+    subscription: document.getElementById("subscription-state"),
+    subscriptionNote: document.getElementById("subscription-note")
   };
 
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
+  const stored = await chrome.storage.local.get([
+    STORAGE_KEY,
+    OPTIONS_KEY,
+    SUBSCRIPTION_STATE_KEY
+  ]);
   const state = stored?.[STORAGE_KEY];
   const status = state?.status;
+  const linkingEnabled = stored?.[OPTIONS_KEY]?.linkSubscriptionBlocks !== false;
+  const subscription = stored?.[SUBSCRIPTION_STATE_KEY];
+
+  elements.options.addEventListener("click", () => chrome.runtime.openOptionsPage());
+
+  if (!linkingEnabled) {
+    elements.subscription.textContent = "Off";
+    elements.subscriptionNote.textContent = "Existing BGG subscription blocks are unchanged.";
+  } else if (subscription?.state === "synced") {
+    elements.subscription.textContent = "On";
+    elements.subscriptionNote.textContent =
+      `${subscription.subscriptionBlockedCount || 0} of ${subscription.hiddenCount || 0} hidden users linked.`;
+  } else if (subscription?.state === "partial") {
+    elements.subscription.textContent = "Partial";
+    elements.subscriptionNote.textContent =
+      `${subscription.failedCount || 0} hidden users could not be linked.`;
+  } else if (subscription?.state === "error") {
+    elements.subscription.textContent = "Error";
+    elements.subscriptionNote.textContent = "Latest linking attempt failed; forum blocking is still active.";
+  } else if (subscription?.state === "syncing") {
+    elements.subscription.textContent = "Syncing";
+    elements.subscriptionNote.textContent = "Linking hidden users to subscription blocks…";
+  }
 
   if (!status) {
     return;

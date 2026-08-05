@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Settings bridge test</title>
+    <script>
+      const writes = [];
+      const listeners = [];
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() {
+              return {};
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          },
+          onChanged: {
+            addListener(listener) {
+              listeners.push(listener);
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/settings-bridge.js"></script>
+  </head>
+  <body data-status="running">
+    <script>
+      setTimeout(() => {
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+        const settings = document.getElementById("bgg-hard-blocker-settings");
+        const initial = JSON.parse(settings?.getAttribute("content") || "null");
+
+        check(initial?.linkSubscriptionBlocks === true, "subscription linking did not default on");
+        check(listeners.length === 1, "storage changes are not observed");
+
+        listeners[0](
+          {
+            bggHardBlockerOptions: {
+              newValue: { linkSubscriptionBlocks: false }
+            }
+          },
+          "local"
+        );
+        const updated = JSON.parse(settings?.getAttribute("content") || "null");
+        check(updated?.linkSubscriptionBlocks === false, "stored opt-out was not published");
+
+        const data = document.createElement("meta");
+        data.id = "bgg-hard-blocker-data";
+        data.setAttribute(
+          "content",
+          JSON.stringify({
+            subscriptionLinking: {
+              enabled: true,
+              state: "synced",
+              hiddenCount: 2,
+              subscriptionBlockedCount: 2,
+              addedCount: 1,
+              failedCount: 0
+            }
+          })
+        );
+        document.documentElement.appendChild(data);
+        document.dispatchEvent(new CustomEvent("bgg-hard-blocker:blocklist"));
+
+        setTimeout(() => {
+          check(
+            writes.at(-1)?.bggHardBlockerSubscriptionState?.state === "synced",
+            "subscription status was not saved"
+          );
+          document.body.dataset.status = failures.length ? "fail" : "pass";
+          document.body.dataset.report = JSON.stringify({ failures, writes });
+        }, 25);
+      }, 50);
+    </script>
+  </body>
+</html>
