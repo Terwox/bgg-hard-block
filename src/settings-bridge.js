@@ -4,7 +4,11 @@
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
   const CONSENT_KEY = "bggHardBlockerConsent";
-  const DISCLOSURE_VERSION = "2026-08-05";
+  // Unpacked Chrome can read newer source before its manifest is reloaded.
+  const LOADED_EXTENSION_VERSION = chrome.runtime?.getManifest?.().version || "";
+  const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
+    ? "2026-08-04"
+    : "2026-08-05";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SETTINGS_ELEMENT_ID = "bgg-hard-blocker-settings";
   const SETTINGS_EVENT = "bgg-hard-blocker:settings";

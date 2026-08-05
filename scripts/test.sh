@@ -35,7 +35,7 @@ done
 node "$repo_dir/tests/background.test.js"
 node "$repo_dir/tests/manifest-scope.test.js"
 
-for fixture in dom-filter consent-gate onboarding page-bridge settings-bridge subscription-linking-disabled content-runtime lazy-content-runtime cache-hold; do
+for fixture in dom-filter consent-gate onboarding page-bridge settings-bridge subscription-linking-disabled content-runtime mixed-version-runtime lazy-content-runtime cache-hold; do
   python3 "$repo_dir/scripts/browser_test.py" \
     --chrome "$chrome_bin" \
     "$repo_dir/tests/$fixture.html"

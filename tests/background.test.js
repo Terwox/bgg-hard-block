@@ -11,6 +11,9 @@ let storedConsent;
 
 globalThis.chrome = {
   runtime: {
+    getManifest() {
+      return { version: "0.3.4" };
+    },
     getURL(relativePath) {
       return `chrome-extension://test/${relativePath}`;
     },
