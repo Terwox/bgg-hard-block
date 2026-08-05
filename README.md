@@ -14,6 +14,10 @@ By default, it also adds every BGG Hidden User to BGG's separate user-level
 subscription block list. This is a one-way safety rule: disabling the option stops
 future linking, but does not delete subscription blocks already stored by BGG.
 
+On first install, the extension opens a one-time privacy disclosure. It does not
+read or filter BGG data until the user affirmatively agrees. A changed disclosure
+version disables processing until the user reviews and accepts the new version.
+
 The forum body remains hidden until the first filtering pass completes, so blocked content does not flash onscreen. Live synchronization can reveal it immediately; otherwise it is revealed no later than 500 ms after `DOMContentLoaded`. A two-second CSS failsafe prevents broken JavaScript or changed BGG markup from leaving the site permanently blank.
 
 ## Install locally
@@ -22,7 +26,8 @@ The forum body remains hidden until the first filtering pass completes, so block
 2. Enable **Developer mode**.
 3. Choose **Load unpacked**.
 4. Select this repository folder.
-5. Open or reload a BGG forum thread while signed in.
+5. Review the disclosure and choose **Agree and enable BGG Hard Block**.
+6. Open or reload a BGG forum thread while signed in.
 
 The toolbar popup reports the current block-list count, subscription-link status,
 and how many posts and quotations the extension removed on the latest forum page.
@@ -38,8 +43,8 @@ to it but does not hide or replace it. BGG's separate subscription blocks are at
 
 BGG's current frontend requests `https://api.geekdo.com/api/userblock`, which returns the signed-in user's blocked user IDs. A document-start bridge observes the `GeekAuth` request header that BGG itself adds, uses it only in memory to request the block list and public usernames, and never sends it to the isolated content script or saves it.
 
-The isolated content script caches only blocked usernames, the subscription-linking
-option, and status counts in `chrome.storage.local`. A `MutationObserver` applies
+The isolated content script caches only the consent record, blocked usernames, the
+subscription-linking option, and status counts in `chrome.storage.local`. A `MutationObserver` applies
 the same filter to posts loaded dynamically. Profile ID-to-name mappings are cached
 for 30 days in BGG's own local storage to avoid repeating every public profile
 request on every page.
@@ -60,8 +65,8 @@ The test suite has no package dependencies. It uses a local headless Chromium in
 
 It covers native BGG placeholders, full blocked-author posts, blocked quotations
 inside allowed replies, username normalization, authenticated API bridging,
-credential non-disclosure, default-on and opt-out subscription linking, page reveal
-behavior, and status storage.
+credential non-disclosure, pre-consent inactivity, affirmative onboarding,
+default-on and opt-out subscription linking, page reveal behavior, and status storage.
 
 An optional networked smoke test loads the unpacked extension into a disposable Chromium profile, seeds a temporary test username, and verifies post and quote removal against a live BGG thread. If BGG gives headless Chromium a Cloudflare challenge, the test keeps the real extension loaded on the BGG origin and substitutes the live markup shape captured during development:
 

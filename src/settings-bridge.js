@@ -3,6 +3,8 @@
 
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
+  const CONSENT_KEY = "bggHardBlockerConsent";
+  const DISCLOSURE_VERSION = "2026-08-04";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SETTINGS_ELEMENT_ID = "bgg-hard-blocker-settings";
   const SETTINGS_EVENT = "bgg-hard-blocker:settings";
@@ -12,7 +14,10 @@
     return;
   }
 
-  function publish(linkSubscriptionBlocks, storageAvailable = true) {
+  let consentGranted = false;
+  let linkSubscriptionBlocks = false;
+
+  function publish(storageAvailable = true) {
     let element = document.getElementById(SETTINGS_ELEMENT_ID);
     if (!element) {
       element = document.createElement("meta");
@@ -23,7 +28,7 @@
 
     element.setAttribute(
       "content",
-      JSON.stringify({ linkSubscriptionBlocks, storageAvailable })
+      JSON.stringify({ consentGranted, linkSubscriptionBlocks, storageAvailable })
     );
     document.dispatchEvent(new CustomEvent(SETTINGS_EVENT));
   }
@@ -43,7 +48,7 @@
 
   function storeSubscriptionState() {
     const subscriptionLinking = readBlockListPayload()?.subscriptionLinking;
-    if (!subscriptionLinking || !globalThis.chrome?.storage?.local?.set) {
+    if (!consentGranted || !subscriptionLinking || !globalThis.chrome?.storage?.local?.set) {
       return;
     }
 
@@ -55,19 +60,26 @@
     });
   }
 
-  async function loadOptions() {
+  function hasCurrentConsent(consent) {
+    return consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
+  }
+
+  async function loadSettings() {
     if (!globalThis.chrome?.storage?.local?.get) {
-      publish(false, false);
+      publish(false);
       return;
     }
 
     try {
-      const stored = await chrome.storage.local.get(OPTIONS_KEY);
+      const stored = await chrome.storage.local.get([CONSENT_KEY, OPTIONS_KEY]);
+      consentGranted = hasCurrentConsent(stored?.[CONSENT_KEY]);
       const options = stored?.[OPTIONS_KEY];
-      publish(options?.linkSubscriptionBlocks !== false);
+      linkSubscriptionBlocks = consentGranted && options?.linkSubscriptionBlocks !== false;
+      publish();
     } catch (_error) {
-      // A stored opt-out must never be bypassed if extension storage is unavailable.
-      publish(false, false);
+      consentGranted = false;
+      linkSubscriptionBlocks = false;
+      publish(false);
     }
   }
 
@@ -75,14 +87,13 @@
 
   if (globalThis.chrome?.storage?.onChanged?.addListener) {
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "local" || !changes[OPTIONS_KEY]) {
+      if (areaName !== "local" || (!changes[CONSENT_KEY] && !changes[OPTIONS_KEY])) {
         return;
       }
-
-      publish(changes[OPTIONS_KEY].newValue?.linkSubscriptionBlocks !== false);
+      loadSettings();
     });
   }
 
-  loadOptions();
+  loadSettings();
   storeSubscriptionState();
 })();

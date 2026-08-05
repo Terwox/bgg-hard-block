@@ -37,6 +37,18 @@ small,
   color: #52606d;
 }
 
+.setup {
+  margin-top: 14px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: #173f5f;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 section {
   padding: 20px;
   border: 1px solid #d7dee5;

@@ -1,6 +1,8 @@
 (async function renderPopup() {
   "use strict";
 
+  const CONSENT_KEY = "bggHardBlockerConsent";
+  const DISCLOSURE_VERSION = "2026-08-04";
   const STORAGE_KEY = "bggHardBlockerState";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
@@ -15,16 +17,34 @@
   };
 
   const stored = await chrome.storage.local.get([
+    CONSENT_KEY,
     STORAGE_KEY,
     OPTIONS_KEY,
     SUBSCRIPTION_STATE_KEY
   ]);
   const state = stored?.[STORAGE_KEY];
   const status = state?.status;
+  const consent = stored?.[CONSENT_KEY];
+  const consentGranted =
+    consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
   const linkingEnabled = stored?.[OPTIONS_KEY]?.linkSubscriptionBlocks !== false;
   const subscription = stored?.[SUBSCRIPTION_STATE_KEY];
 
-  elements.options.addEventListener("click", () => chrome.runtime.openOptionsPage());
+  elements.options.addEventListener("click", () => {
+    if (consentGranted) {
+      chrome.runtime.openOptionsPage();
+    } else {
+      chrome.tabs.create({ url: chrome.runtime.getURL("src/onboarding.html") });
+    }
+  });
+
+  if (!consentGranted) {
+    elements.state.textContent = "Setup required";
+    elements.subscription.textContent = "Off";
+    elements.subscriptionNote.textContent = "No BGG data is processed until you agree.";
+    elements.options.textContent = "Complete setup";
+    return;
+  }
 
   if (!linkingEnabled) {
     elements.subscription.textContent = "Off";

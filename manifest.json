@@ -1,12 +1,15 @@
 {
   "manifest_version": 3,
   "name": "BGG Hard Block",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Hard-removes hidden users from BGG forums and optionally links them to subscription blocks.",
   "minimum_chrome_version": "111",
   "permissions": [
     "storage"
   ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
   "action": {
     "default_title": "BGG Hard Block",
     "default_popup": "src/popup.html",
