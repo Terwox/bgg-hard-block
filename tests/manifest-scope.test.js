@@ -20,6 +20,12 @@ assert.deepEqual(
   "host access must stay on BGG's canonical HTTPS origin"
 );
 
+assert.deepEqual(
+  manifest.permissions,
+  ["scripting", "storage"],
+  "SPA recovery may use scripting but must not request tabs or webNavigation history access"
+);
+
 for (const contentScript of manifest.content_scripts) {
   assert.deepEqual(
     contentScript.matches,

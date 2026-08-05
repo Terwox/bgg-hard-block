@@ -1,6 +1,12 @@
 (function installBggBlockListBridge() {
   "use strict";
 
+  const INSTALLATION_KEY = "__bggHardBlockerPageBridgeInstalled";
+  if (globalThis[INSTALLATION_KEY]) {
+    return;
+  }
+  globalThis[INSTALLATION_KEY] = true;
+
   const API_ROOT = "https://api.geekdo.com/api";
   const AUTH_PREFIX = "GeekAuth ";
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";

@@ -15,6 +15,27 @@ const DISCUSSION_TAB_PATTERNS = [
   "https://boardgamegeek.com/filepage/*",
   "https://boardgamegeek.com/blog/*/blogpost/*"
 ];
+const DISCUSSION_PATH_PATTERNS = [
+  /^\/thread\//,
+  /^\/geeklist\//,
+  /^\/image\//,
+  /^\/video\//,
+  /^\/filepage\//,
+  /^\/blog\/[^/]+\/blogpost\//
+];
+
+function isDiscussionUrl(urlText) {
+  try {
+    const url = new URL(urlText);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "boardgamegeek.com" &&
+      DISCUSSION_PATH_PATTERNS.some((pattern) => pattern.test(url.pathname))
+    );
+  } catch (_error) {
+    return false;
+  }
+}
 
 function hasCurrentConsent(consent) {
   return consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
@@ -28,6 +49,39 @@ async function hardRefreshDiscussionTabs() {
 
   await Promise.allSettled(refreshes);
 }
+
+async function injectDiscussionScripts(tabId) {
+  const target = { tabId, frameIds: [0] };
+
+  // A BGG client-side route can enter /thread/... without loading a new
+  // document, so declarative path matches never get another chance to attach.
+  // Insert CSS first to suppress any already-rendered blocked content, then
+  // install the same three script worlds used by the declarative cold-load path.
+  await chrome.scripting.insertCSS({
+    target,
+    files: ["src/content.css"]
+  });
+  await chrome.scripting.executeScript({
+    target,
+    files: ["src/page-bridge.js"],
+    world: "MAIN",
+    injectImmediately: true
+  });
+  await chrome.scripting.executeScript({
+    target,
+    files: ["src/settings-bridge.js", "src/content-core.js", "src/content.js"],
+    world: "ISOLATED",
+    injectImmediately: true
+  });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url || !isDiscussionUrl(changeInfo.url)) {
+    return;
+  }
+
+  injectDiscussionScripts(tabId).catch(() => {});
+});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") {

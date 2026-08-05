@@ -7,6 +7,8 @@ const listeners = {};
 const createdTabs = [];
 const queries = [];
 const reloads = [];
+const cssInsertions = [];
+const scriptExecutions = [];
 let storedConsent;
 
 globalThis.chrome = {
@@ -36,6 +38,11 @@ globalThis.chrome = {
     }
   },
   tabs: {
+    onUpdated: {
+      addListener(listener) {
+        listeners.tabUpdated = listener;
+      }
+    },
     async create(options) {
       createdTabs.push(options);
     },
@@ -45,6 +52,15 @@ globalThis.chrome = {
     },
     async reload(tabId, options) {
       reloads.push({ tabId, options });
+    }
+  },
+  scripting: {
+    async insertCSS(options) {
+      cssInsertions.push(options);
+    },
+    async executeScript(options) {
+      scriptExecutions.push(options);
+      return [];
     }
   }
 };
@@ -63,6 +79,45 @@ async function settle() {
 (async () => {
   assert.equal(typeof listeners.installed, "function");
   assert.equal(typeof listeners.storageChanged, "function");
+  assert.equal(typeof listeners.tabUpdated, "function");
+
+  listeners.tabUpdated(
+    19,
+    { url: "https://boardgamegeek.com/boardgame/174430/gloomhaven" },
+    {}
+  );
+  await settle();
+  assert.equal(cssInsertions.length, 0, "unrelated BGG route injected CSS");
+  assert.equal(scriptExecutions.length, 0, "unrelated BGG route injected scripts");
+
+  listeners.tabUpdated(
+    19,
+    { url: "https://boardgamegeek.com/thread/3306128/article/48018767#48018767" },
+    {}
+  );
+  await settle();
+  await settle();
+  await settle();
+  assert.deepEqual(cssInsertions, [
+    {
+      target: { tabId: 19, frameIds: [0] },
+      files: ["src/content.css"]
+    }
+  ]);
+  assert.deepEqual(scriptExecutions, [
+    {
+      target: { tabId: 19, frameIds: [0] },
+      files: ["src/page-bridge.js"],
+      world: "MAIN",
+      injectImmediately: true
+    },
+    {
+      target: { tabId: 19, frameIds: [0] },
+      files: ["src/settings-bridge.js", "src/content-core.js", "src/content.js"],
+      world: "ISOLATED",
+      injectImmediately: true
+    }
+  ]);
 
   storedConsent = undefined;
   await listeners.installed();

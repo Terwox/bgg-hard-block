@@ -37,12 +37,14 @@ subscription-linking status counts, and latest discussion URL in Chrome's local 
 storage. BGG profile identifier-to-name mappings are cached in BGG local storage
 for up to 30 days to avoid repeated profile requests.
 
-The extension's page code is limited to canonical HTTPS URLs for those six BGG
+The extension's filtering and BGG-data code is limited to canonical HTTPS URLs for those six BGG
 discussion page families. It does not inject on BGG's home page, game pages,
 collection, store, account pages, forum indexes, or any other site. Chrome treats
 host permissions as origin-wide even when URL paths are declared; the single BGG
 host permission is used by the background worker only to identify supported open
-discussion tabs for automatic refresh after consent or an extension update.
+discussion tabs for automatic refresh after consent or an extension update and to
+attach the same discussion-only code when BGG enters one of those URLs through an
+in-page route change rather than a new document load.
 
 The extension does not store the BGG `GeekAuth` authorization value. It exists only
 in page memory while the live block list is synchronized and is never exposed to
