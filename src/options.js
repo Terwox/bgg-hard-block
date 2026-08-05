@@ -2,7 +2,7 @@
   "use strict";
 
   const CONSENT_KEY = "bggHardBlockerConsent";
-  const DISCLOSURE_VERSION = "2026-08-04";
+  const DISCLOSURE_VERSION = "2026-08-05";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
   const checkbox = document.getElementById("link-subscription-blocks");
@@ -20,7 +20,7 @@
     }
 
     const labels = {
-      error: "The latest subscription sync failed; forum blocking is still active.",
+      error: "The latest subscription sync failed; discussion blocking is still active.",
       partial: `Linked ${state.addedCount || 0}; ${state.failedCount || 0} could not be linked.`,
       synced: `${state.subscriptionBlockedCount || 0} of ${state.hiddenCount || 0} hidden users are subscription-blocked.`,
       syncing: "Linking hidden users to subscription blocks…",

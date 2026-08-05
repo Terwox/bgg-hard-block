@@ -3,7 +3,7 @@
 
   const core = globalThis.BggHardBlockerCore;
   const CONSENT_KEY = "bggHardBlockerConsent";
-  const DISCLOSURE_VERSION = "2026-08-04";
+  const DISCLOSURE_VERSION = "2026-08-05";
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
   const STORAGE_KEY = "bggHardBlockerState";

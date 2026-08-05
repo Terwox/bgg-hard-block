@@ -1,24 +1,22 @@
 "use strict";
 
 const CONSENT_KEY = "bggHardBlockerConsent";
-const DISCLOSURE_VERSION = "2026-08-04";
-const FORUM_TAB_PATTERNS = [
-  "*://boardgamegeek.com/forum/*",
-  "*://boardgamegeek.com/forums*",
-  "*://boardgamegeek.com/thread/*",
-  "*://boardgamegeek.com/threads/*",
-  "*://www.boardgamegeek.com/forum/*",
-  "*://www.boardgamegeek.com/forums*",
-  "*://www.boardgamegeek.com/thread/*",
-  "*://www.boardgamegeek.com/threads/*"
+const DISCLOSURE_VERSION = "2026-08-05";
+const DISCUSSION_TAB_PATTERNS = [
+  "https://boardgamegeek.com/thread/*",
+  "https://boardgamegeek.com/geeklist/*",
+  "https://boardgamegeek.com/image/*",
+  "https://boardgamegeek.com/video/*",
+  "https://boardgamegeek.com/filepage/*",
+  "https://boardgamegeek.com/blog/*/blogpost/*"
 ];
 
 function hasCurrentConsent(consent) {
   return consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
 }
 
-async function hardRefreshForumTabs() {
-  const tabs = await chrome.tabs.query({ url: FORUM_TAB_PATTERNS });
+async function hardRefreshDiscussionTabs() {
+  const tabs = await chrome.tabs.query({ url: DISCUSSION_TAB_PATTERNS });
   const refreshes = tabs
     .filter((tab) => Number.isInteger(tab.id))
     .map((tab) => chrome.tabs.reload(tab.id, { bypassCache: true }));
@@ -36,14 +34,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     !hasCurrentConsent(consentChange?.oldValue) &&
     hasCurrentConsent(consentChange?.newValue)
   ) {
-    hardRefreshForumTabs().catch(() => {});
+    hardRefreshDiscussionTabs().catch(() => {});
   }
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
   const stored = await chrome.storage.local.get(CONSENT_KEY);
   if (hasCurrentConsent(stored?.[CONSENT_KEY])) {
-    await hardRefreshForumTabs();
+    await hardRefreshDiscussionTabs();
     return;
   }
 

@@ -24,7 +24,7 @@ Turn BoardGameGeek's soft hide into a hard block.
 BGG Hard Block removes:
 
 - native “Blocked User / Show Anyway” placeholders
-- complete forum posts written by anyone on your BGG Hidden Users list
+- complete discussion posts or comments written by anyone on your BGG Hidden Users list
 - quotations attributed to hidden users, while preserving the surrounding reply
 
 By default, it also adds Hidden Users to BGG's separate user-level subscription
@@ -47,7 +47,7 @@ endorsed by BoardGameGeek, LLC.
 
 ## Single purpose
 
-Remove forum content from users on the signed-in person's BGG Hidden Users list
+Remove discussion content from users on the signed-in person's BGG Hidden Users list
 and, when the user leaves the option enabled, keep BGG's separate user-level
 subscription blocks aligned with that same list.
 
@@ -62,9 +62,13 @@ synced to the developer or a third party.
 ### BoardGameGeek page access
 
 Required to read BGG's Hidden Users list through BGG's own HTTPS API, identify
-authors in rendered forum markup, remove matching posts/placeholders/quotations,
+authors in rendered discussion markup, remove matching posts/placeholders/quotations,
 and optionally add missing user-level subscription blocks to the signed-in BGG
-account. The extension does not run on other sites.
+account. Page code is injected only on canonical HTTPS forum threads, GeekLists,
+images, videos, files, and individual blog posts. It does not run on unrelated BGG
+pages or any other site. Chrome ignores URL paths for host permissions, so the
+single canonical BGG origin permission is also used to identify supported open
+discussion tabs for automatic refresh after consent or extension updates.
 
 ## Data disclosures
 
@@ -72,8 +76,8 @@ The extension handles these categories solely for its disclosed single purpose:
 
 - personally identifiable information: BGG user identifiers and public usernames
 - authentication information: the current BGG authorization value, transiently in page memory
-- website content: rendered BGG forum posts and author attributions
-- web browsing activity: the current BGG forum address, stored only for local status reporting
+- website content: rendered BGG discussion posts, comments, and author attributions
+- web browsing activity: the current supported BGG discussion address, stored only for local status reporting
 
 The extension does not collect financial, health, location, personal communication,
 or advertising-profile data. Terwox receives no extension user data and no human can
