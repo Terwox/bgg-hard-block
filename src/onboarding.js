@@ -20,7 +20,7 @@
         linkSubscriptionBlocks: linking.checked
       }
     });
-    status.textContent = "Enabled. Reload any open BGG tabs to start hard blocking.";
+    status.textContent = "Enabled. Open BGG forum tabs are refreshing now.";
     agree.textContent = "BGG Hard Block is enabled";
   });
 

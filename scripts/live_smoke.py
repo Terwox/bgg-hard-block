@@ -141,7 +141,25 @@ async def find_extension_id(port: int) -> str:
     raise TimeoutError("Could not find BGG Hard Block on chrome://extensions")
 
 
-async def wait_for_filtered_thread(websocket_url: str) -> dict[str, object]:
+async def read_page_time_origin(websocket_url: str) -> float:
+    async with websockets.connect(websocket_url, max_size=2_000_000) as websocket:
+        counter = 0
+        deadline = asyncio.get_running_loop().time() + 12
+        while asyncio.get_running_loop().time() < deadline:
+            counter, value = await evaluate(
+                websocket,
+                counter,
+                "document.readyState === 'complete' ? performance.timeOrigin : 0",
+            )
+            if isinstance(value, (int, float)) and value > 0:
+                return float(value)
+            await asyncio.sleep(0.1)
+    raise TimeoutError("BGG tab did not finish its pre-consent load")
+
+
+async def wait_for_filtered_thread(
+    websocket_url: str, previous_time_origin: float
+) -> dict[str, object]:
     expression = f"""
       (() => {{
         const username = {json.dumps(TEST_USERNAME.lower())};
@@ -159,6 +177,8 @@ async def wait_for_filtered_thread(websocket_url: str) -> dict[str, object]:
         return {{
           ready: document.documentElement.hasAttribute('data-bgg-hard-blocker-ready'),
           title: document.title,
+          timeOrigin: performance.timeOrigin,
+          navigationType: performance.getEntriesByType('navigation')[0]?.type || '',
           postCount: document.querySelectorAll('article.post').length,
           matchingPosts: postAuthors.filter((author) => author === username).length,
           matchingQuotes: quoteAuthors.filter((author) => author === username).length,
@@ -174,7 +194,12 @@ async def wait_for_filtered_thread(websocket_url: str) -> dict[str, object]:
         while asyncio.get_running_loop().time() < deadline:
             counter, value = await evaluate(websocket, counter, expression)
             latest = value if isinstance(value, dict) else {}
-            if latest.get("ready") and int(latest.get("postCount", 0)) >= 5:
+            refreshed = abs(float(latest.get("timeOrigin", 0)) - previous_time_origin) > 1
+            if (
+                refreshed
+                and latest.get("ready")
+                and int(latest.get("postCount", 0)) >= 5
+            ):
                 return latest
             await asyncio.sleep(0.2)
         return latest
@@ -246,13 +271,24 @@ async def run_observed_markup_fallback(websocket_url: str) -> dict[str, object]:
 
 async def read_extension_status(websocket_url: str) -> dict[str, object]:
     async with websockets.connect(websocket_url, max_size=2_000_000) as websocket:
-        _, value = await evaluate(
-            websocket,
-            0,
-            "chrome.storage.local.get('bggHardBlockerState')"
-            ".then((x) => x.bggHardBlockerState?.status || {})",
-        )
-        return value if isinstance(value, dict) else {}
+        counter = 0
+        deadline = asyncio.get_running_loop().time() + 3
+        latest: dict[str, object] = {}
+        while asyncio.get_running_loop().time() < deadline:
+            counter, value = await evaluate(
+                websocket,
+                counter,
+                "chrome.storage.local.get('bggHardBlockerState')"
+                ".then((x) => x.bggHardBlockerState?.status || {})",
+            )
+            latest = value if isinstance(value, dict) else {}
+            if (
+                int(latest.get("hiddenPosts", 0)) >= 1
+                and int(latest.get("hiddenQuotes", 0)) >= 1
+            ):
+                return latest
+            await asyncio.sleep(0.05)
+        return latest
 
 
 def stop_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -305,9 +341,12 @@ def main() -> int:
             extension_ws = open_target(
                 port, f"chrome-extension://{identifier}/src/popup.html"
             )
-            asyncio.run(seed_cached_block_list(extension_ws))
             thread_ws = open_target(port, THREAD_URL)
-            page = asyncio.run(wait_for_filtered_thread(thread_ws))
+            previous_time_origin = asyncio.run(read_page_time_origin(thread_ws))
+            asyncio.run(seed_cached_block_list(extension_ws))
+            page = asyncio.run(
+                wait_for_filtered_thread(thread_ws, previous_time_origin)
+            )
             mode = "live"
             fallback: dict[str, object] = {}
             if int(page.get("postCount", 0)) < 5:
@@ -318,6 +357,12 @@ def main() -> int:
             stop_process_group(process)
 
     failures = []
+    consent_refresh = (
+        abs(float(page.get("timeOrigin", 0)) - previous_time_origin) > 1
+        and page.get("navigationType") == "reload"
+    )
+    if not consent_refresh:
+        failures.append("granting consent did not hard-refresh the open BGG tab")
     if not page.get("ready"):
         failures.append("extension did not reveal the forum page")
     if mode == "live":
@@ -359,6 +404,7 @@ def main() -> int:
             {
                 "status": "PASS",
                 "mode": mode,
+                "consentRefresh": consent_refresh,
                 "postCount": page["postCount"],
                 "removedPosts": status["hiddenPosts"],
                 "removedQuotes": status["hiddenQuotes"],
