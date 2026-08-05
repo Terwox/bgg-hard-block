@@ -1,6 +1,11 @@
 (function bridgeBggHardBlockerSettings() {
   "use strict";
 
+  const INSTALLATION_KEY = "__bggHardBlockerSettingsBridgeInstalled";
+  if (globalThis[INSTALLATION_KEY]) {
+    return;
+  }
+
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
   const CONSENT_KEY = "bggHardBlockerConsent";
@@ -17,6 +22,7 @@
   if (!document.documentElement) {
     return;
   }
+  globalThis[INSTALLATION_KEY] = true;
 
   let consentGranted = false;
   let linkSubscriptionBlocks = false;

@@ -21,14 +21,19 @@ When consent is granted or an enabled extension update is installed, the
 extension automatically hard-refreshes every open supported BGG discussion tab
 so the current content scripts attach immediately.
 
-The extension's page code runs only on canonical HTTPS URLs for forum threads,
+The extension's filtering and BGG-data code runs only on canonical HTTPS URLs for forum threads,
 GeekLists, images, videos, files, and individual blog posts. It does not inject on
 BGG's home page, game pages, collection, store, account pages, forum indexes, or
-any other site. Chrome represents host permissions at the origin level and ignores
+any other site. If BGG enters a supported discussion through an in-page route
+change, the background worker injects that same discussion-only code at the new
+URL; this fixes routes that do not create a new document for Chrome's declarative
+path matching. Chrome represents host permissions at the origin level and ignores
 their path component, so the extension details UI still names BoardGameGeek as a
-site even though content-script injection is path-limited. The single canonical
-BGG host permission lets the background worker find only supported discussion tabs
-for the automatic refresh; the extension does not request Chrome's broad
+site even though content-script injection is path-limited. The single canonical BGG
+host permission lets the background worker find only supported discussion tabs for
+the automatic refresh and attach the filter after a BGG in-page route change. The
+extension uses Chrome's warning-free `scripting` permission for that attachment and
+does not request `tabs` or `webNavigation`, which would expose broad
 browsing-history access.
 
 The discussion page remains hidden until the first filtering pass completes, so blocked content does not flash onscreen. Live synchronization can reveal it immediately; otherwise it is revealed no later than 500 ms after `DOMContentLoaded`. After that ceiling, the extension watches each lazy-loaded post and quotation in place. A semantic CSS guard suppresses BGG's native blocked placeholder immediately, while the mutation filter rechecks the owning post or quotation as its text, links, and attributes arrive. A two-second CSS failsafe prevents broken JavaScript or changed BGG markup from leaving the site permanently blank.
@@ -80,7 +85,8 @@ The test suite has no package dependencies. It uses a local headless Chromium in
 It covers native BGG placeholders, full blocked-author posts, blocked quotations
 inside allowed replies, username normalization, authenticated API bridging,
 credential non-disclosure, pre-consent inactivity, affirmative onboarding,
-consent-triggered discussion-tab refresh, path-limited manifest scope, default-on
+consent-triggered discussion-tab refresh, path-limited manifest scope, in-page
+discussion-route injection, default-on
 and opt-out subscription linking,
 page reveal behavior, lazy post and quotation assembly, and status storage.
 

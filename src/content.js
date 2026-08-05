@@ -1,6 +1,11 @@
 (async function runBggHardBlocker() {
   "use strict";
 
+  const INSTALLATION_KEY = "__bggHardBlockerContentInstalled";
+  if (globalThis[INSTALLATION_KEY]) {
+    return;
+  }
+
   const core = globalThis.BggHardBlockerCore;
   const CONSENT_KEY = "bggHardBlockerConsent";
   // Unpacked Chrome can read newer source before its manifest is reloaded.
@@ -19,6 +24,7 @@
   if (!core || !document.documentElement) {
     return;
   }
+  globalThis[INSTALLATION_KEY] = true;
 
   try {
     const storedConsent = await chrome.storage.local.get(CONSENT_KEY);
