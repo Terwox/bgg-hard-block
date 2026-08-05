@@ -34,7 +34,7 @@ header p {
 
 dl {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin: 16px 0;
 }
@@ -66,6 +66,31 @@ dd {
   line-height: 1.45;
 }
 
+.subscription-note {
+  margin-top: 6px;
+}
+
+nav {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+button {
+  padding: 5px 9px;
+  border: 1px solid #b8c3cc;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: #1769aa;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     background: #18212b;
@@ -81,5 +106,14 @@ dd {
   dl div {
     border-color: #40505f;
     background: #24313d;
+  }
+
+  button {
+    border-color: #526575;
+    background: #24313d;
+  }
+
+  a {
+    color: #79b8ff;
   }
 }

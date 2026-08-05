@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Disabled subscription linking test</title>
+    <meta id="bgg-hard-blocker-settings" content='{"linkSubscriptionBlocks":false}'>
+    <script>
+      const calls = [];
+      window.fetch = async (input, init = {}) => {
+        const url = String(input instanceof Request ? input.url : input);
+        const method = String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+        calls.push({ url, method });
+        let payload = { ok: true };
+        if (url.endsWith("/api/userblock")) payload = [42];
+        if (url.endsWith("/api/user/42")) payload = { username: "Muted User" };
+        if (url.includes("/api/blocks?type=user")) {
+          payload = { essentialItems: [], feeds: [], links: [] };
+        }
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      };
+    </script>
+    <script src="../src/page-bridge.js"></script>
+  </head>
+  <body data-status="running">
+    <script>
+      fetch("https://api.geekdo.com/api/thread/123", {
+        headers: { Authorization: "GeekAuth test-only-token" }
+      });
+
+      setTimeout(() => {
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+        const element = document.getElementById("bgg-hard-blocker-data");
+        const payload = JSON.parse(element?.getAttribute("content") || "null");
+
+        check(payload?.status === "ready", "forum block-list sync did not finish");
+        check(payload?.subscriptionLinking?.state === "disabled", "disabled state was not published");
+        check(
+          !calls.some((call) => call.url.includes("/api/blocks?type=user")),
+          "disabled linking still read subscription blocks"
+        );
+        check(
+          !calls.some((call) => call.method === "PUT"),
+          "disabled linking wrote a subscription block"
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, calls });
+      }, 150);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BGG Hard Block options</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="../icons/icon-48.png" width="48" height="48" alt="">
+        <div>
+          <h1>BGG Hard Block</h1>
+          <p>Options</p>
+        </div>
+      </header>
+
+      <section>
+        <label class="toggle-row">
+          <span>
+            <strong>Also block hidden users from subscriptions</strong>
+            <small>Keep BGG’s user-level subscription blocks aligned with Hidden Users.</small>
+          </span>
+          <input id="link-subscription-blocks" type="checkbox" checked>
+        </label>
+        <p class="explanation">
+          Enabled by default. Turning this off stops future linking; it does not remove
+          subscription blocks already added to your BGG account.
+        </p>
+        <p id="save-status" class="status" role="status"></p>
+        <p id="sync-status" class="status"></p>
+      </section>
+
+      <nav aria-label="BoardGameGeek block lists">
+        <a href="https://boardgamegeek.com/geekblock/list" target="_blank" rel="noreferrer">Manage BGG Hidden Users</a>
+        <a href="https://boardgamegeek.com/subscriptions/blocks?feedType=user" target="_blank" rel="noreferrer">Manage subscription blocks</a>
+      </nav>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

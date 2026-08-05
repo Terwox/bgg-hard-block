@@ -7,6 +7,8 @@
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
   const PROFILE_CACHE_KEY = "bgg-hard-blocker-profile-cache-v1";
   const PROFILE_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+  const SETTINGS_ELEMENT_ID = "bgg-hard-blocker-settings";
+  const SETTINGS_EVENT = "bgg-hard-blocker:settings";
 
   const originalFetch = window.fetch.bind(window);
   const originalXhrOpen = XMLHttpRequest.prototype.open;
@@ -15,6 +17,10 @@
 
   let authHeader = "";
   let attemptedAuthHeader = "";
+  let lastBlockListPayload = null;
+  let linkSubscriptionBlocks = null;
+  let subscriptionResyncRequested = false;
+  let subscriptionSyncPromise = null;
   let syncPromise = null;
   let resyncRequested = false;
 
@@ -29,6 +35,31 @@
 
     element.setAttribute("content", JSON.stringify(payload));
     document.dispatchEvent(new CustomEvent(DATA_EVENT));
+  }
+
+  function publishSubscriptionLinking(subscriptionLinking) {
+    if (!lastBlockListPayload) {
+      return;
+    }
+
+    lastBlockListPayload = {
+      ...lastBlockListPayload,
+      subscriptionLinking
+    };
+    publish(lastBlockListPayload);
+  }
+
+  function readSettingsPayload() {
+    const element = document.getElementById(SETTINGS_ELEMENT_ID);
+    if (!element) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(element.getAttribute("content") || "null");
+    } catch (_error) {
+      return null;
+    }
   }
 
   function captureAuthorization(name, value) {
@@ -80,13 +111,15 @@
     }
   }
 
-  async function fetchJson(url, authorization) {
+  async function fetchApi(url, authorization, init = {}) {
     const response = await originalFetch(url, {
-      method: "GET",
+      method: init.method || "GET",
       headers: {
         Accept: "application/json",
-        Authorization: authorization
+        Authorization: authorization,
+        ...(init.headers || {})
       },
+      body: init.body,
       cache: "no-store",
       credentials: "omit"
     });
@@ -95,7 +128,16 @@
       throw new Error(`BGG API returned ${response.status} for ${url}`);
     }
 
-    return response.json();
+    if (response.status === 204) {
+      return null;
+    }
+
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  function fetchJson(url, authorization) {
+    return fetchApi(url, authorization);
   }
 
   async function resolveBlockedProfiles(userIds, authorization) {
@@ -148,6 +190,153 @@
     };
   }
 
+  function normalizeApiLink(uri) {
+    const url = new URL(String(uri || ""), `${API_ROOT}/`);
+    if (url.origin !== new URL(API_ROOT).origin) {
+      throw new Error("BGG returned a subscription pagination link on another origin");
+    }
+    return url.href;
+  }
+
+  async function fetchSubscriptionBlockedUserIds(authorization) {
+    const blocked = new Set();
+    const visited = new Set();
+    let url = `${API_ROOT}/blocks?type=user&singular=1`;
+
+    while (url && !visited.has(url)) {
+      visited.add(url);
+      const payload = await fetchJson(url, authorization);
+
+      for (const feed of Array.isArray(payload?.feeds) ? payload.feeds : []) {
+        if (feed?.item?.type === "user" && feed.item.id != null) {
+          blocked.add(String(feed.item.id));
+        }
+      }
+
+      const next = Array.isArray(payload?.links)
+        ? payload.links.find((link) => link?.rel === "next")?.uri
+        : null;
+      url = next ? normalizeApiLink(next) : "";
+    }
+
+    return blocked;
+  }
+
+  function addSubscriptionBlock(userId, authorization) {
+    return fetchApi(
+      `${API_ROOT}/user/${encodeURIComponent(userId)}/blocks`,
+      authorization,
+      { method: "PUT", body: "" }
+    );
+  }
+
+  async function reconcileSubscriptionBlocks(userIds, authorization) {
+    const hiddenIds = [...new Set(userIds.map(String))];
+    publishSubscriptionLinking({
+      enabled: true,
+      state: "syncing",
+      hiddenCount: hiddenIds.length,
+      subscriptionBlockedCount: null,
+      addedCount: 0,
+      failedCount: 0
+    });
+
+    try {
+      const subscriptionBlocked = await fetchSubscriptionBlockedUserIds(authorization);
+      const missing = hiddenIds.filter((id) => !subscriptionBlocked.has(id));
+      let addedCount = 0;
+      let failedCount = 0;
+
+      for (const id of missing) {
+        if (linkSubscriptionBlocks !== true) {
+          publishSubscriptionLinking({
+            enabled: false,
+            state: "disabled",
+            hiddenCount: hiddenIds.length,
+            subscriptionBlockedCount: subscriptionBlocked.size,
+            addedCount,
+            failedCount
+          });
+          return;
+        }
+
+        try {
+          await addSubscriptionBlock(id, authorization);
+          subscriptionBlocked.add(id);
+          addedCount += 1;
+        } catch (_error) {
+          failedCount += 1;
+        }
+      }
+
+      publishSubscriptionLinking({
+        enabled: true,
+        state: failedCount ? "partial" : "synced",
+        hiddenCount: hiddenIds.length,
+        subscriptionBlockedCount: subscriptionBlocked.size,
+        addedCount,
+        failedCount,
+        syncedAt: new Date().toISOString()
+      });
+    } catch (_error) {
+      publishSubscriptionLinking({
+        enabled: true,
+        state: "error",
+        hiddenCount: hiddenIds.length,
+        subscriptionBlockedCount: null,
+        addedCount: 0,
+        failedCount: hiddenIds.length,
+        syncedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  function queueSubscriptionSync(userIds, authorization, force = false) {
+    if (linkSubscriptionBlocks !== true || !authorization) {
+      return Promise.resolve();
+    }
+
+    if (subscriptionSyncPromise) {
+      subscriptionResyncRequested ||= force;
+      return subscriptionSyncPromise;
+    }
+
+    subscriptionSyncPromise = reconcileSubscriptionBlocks(userIds, authorization)
+      .finally(() => {
+        subscriptionSyncPromise = null;
+        if (subscriptionResyncRequested && lastBlockListPayload) {
+          subscriptionResyncRequested = false;
+          queueSubscriptionSync(lastBlockListPayload.userIds, authHeader);
+        }
+      });
+
+    return subscriptionSyncPromise;
+  }
+
+  function acceptSettingsPayload() {
+    const settings = readSettingsPayload();
+    if (typeof settings?.linkSubscriptionBlocks !== "boolean") {
+      return;
+    }
+
+    linkSubscriptionBlocks = settings.linkSubscriptionBlocks;
+    if (!linkSubscriptionBlocks) {
+      publishSubscriptionLinking({
+        enabled: false,
+        state: "disabled",
+        hiddenCount: lastBlockListPayload?.userIds?.length ?? null,
+        subscriptionBlockedCount: null,
+        addedCount: 0,
+        failedCount: 0
+      });
+      return;
+    }
+
+    if (lastBlockListPayload && authHeader) {
+      queueSubscriptionSync(lastBlockListPayload.userIds, authHeader, true);
+    }
+  }
+
   async function performSync(authorization) {
     const rawBlockList = await fetchJson(`${API_ROOT}/userblock`, authorization);
     const userIds = Array.isArray(rawBlockList)
@@ -157,13 +346,27 @@
         : [];
     const profiles = await resolveBlockedProfiles(userIds, authorization);
 
-    publish({
+    lastBlockListPayload = {
       status: "ready",
       userIds,
       usernames: profiles.usernames,
       unresolved: profiles.unresolved,
       syncedAt: new Date().toISOString()
-    });
+    };
+    publish(lastBlockListPayload);
+
+    if (linkSubscriptionBlocks === false) {
+      publishSubscriptionLinking({
+        enabled: false,
+        state: "disabled",
+        hiddenCount: userIds.length,
+        subscriptionBlockedCount: null,
+        addedCount: 0,
+        failedCount: 0
+      });
+    } else if (linkSubscriptionBlocks === true) {
+      queueSubscriptionSync(userIds, authorization, true);
+    }
   }
 
   function syncBlockList(force = false) {
@@ -195,6 +398,9 @@
 
     return syncPromise;
   }
+
+  document.addEventListener(SETTINGS_EVENT, acceptSettingsPayload);
+  acceptSettingsPayload();
 
   XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
     xhrMetadata.set(this, {
