@@ -38,7 +38,7 @@
           saved.bggHardBlockerOptions?.linkSubscriptionBlocks === true,
           "subscription choice was not stored"
         );
-        check(/Enabled/.test(document.getElementById("status").textContent), "success status was not shown");
+        check(/refreshing/i.test(document.getElementById("status").textContent), "automatic refresh status was not shown");
 
         document.body.dataset.status = failures.length ? "fail" : "pass";
         document.body.dataset.report = JSON.stringify({ failures, saved });
