@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Mixed unpacked-version runtime test</title>
+    <meta id="bgg-hard-blocker-data" content='{"status":"ready","usernames":[],"unresolved":[],"syncedAt":"2026-08-05T00:00:00.000Z"}'>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      const writes = [];
+      globalThis.chrome = {
+        runtime: {
+          getManifest() {
+            return { version: "0.3.2" };
+          }
+        },
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerConsent: {
+                  granted: true,
+                  disclosureVersion: "2026-08-04"
+                }
+              };
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <gg-post id="mixed-version-placeholder">
+      <article class="post">
+        <div class="post-body">
+          <span ngbtooltip="You've blocked content from this user">Blocked User</span>
+          <button>Show Anyway</button>
+        </div>
+      </article>
+    </gg-post>
+    <script>
+      setTimeout(() => {
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(
+          document.documentElement.hasAttribute("data-bgg-hard-blocker-running"),
+          "new source rejected consent belonging to the loaded manifest"
+        );
+        check(
+          !document.getElementById("mixed-version-placeholder"),
+          "native placeholder survived the mixed unpacked-version state"
+        );
+        check(writes.length > 0, "active mixed-version runtime did not write status");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures });
+      }, 150);
+    </script>
+  </body>
+</html>

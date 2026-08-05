@@ -2,7 +2,10 @@
   "use strict";
 
   const CONSENT_KEY = "bggHardBlockerConsent";
-  const DISCLOSURE_VERSION = "2026-08-05";
+  const LOADED_EXTENSION_VERSION = chrome.runtime?.getManifest?.().version || "";
+  const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
+    ? "2026-08-04"
+    : "2026-08-05";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
   const checkbox = document.getElementById("link-subscription-blocks");

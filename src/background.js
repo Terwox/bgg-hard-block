@@ -1,7 +1,12 @@
 "use strict";
 
 const CONSENT_KEY = "bggHardBlockerConsent";
-const DISCLOSURE_VERSION = "2026-08-05";
+// An unpacked extension can read newer source files before Chrome reloads its
+// manifest. Honor the disclosure paired with the manifest Chrome actually loaded.
+const LOADED_EXTENSION_VERSION = chrome.runtime.getManifest?.().version || "";
+const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
+  ? "2026-08-04"
+  : "2026-08-05";
 const DISCUSSION_TAB_PATTERNS = [
   "https://boardgamegeek.com/thread/*",
   "https://boardgamegeek.com/geeklist/*",
