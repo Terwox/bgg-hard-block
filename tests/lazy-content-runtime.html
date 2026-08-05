@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Lazy content runtime test</title>
+    <meta id="bgg-hard-blocker-data" content='{"status":"ready","usernames":["Muted User"],"unresolved":[],"syncedAt":"2026-08-05T00:00:00.000Z"}'>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerConsent: {
+                  granted: true,
+                  disclosureVersion: "2026-08-04"
+                }
+              };
+            },
+            async set() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <div id="feed"></div>
+    <script>
+      const feed = document.getElementById("feed");
+      const blockedPost = document.createElement("gg-post");
+      blockedPost.id = "lazy-blocked-post";
+      blockedPost.innerHTML = '<article class="post"><div class="post-body"></div></article>';
+      feed.append(blockedPost);
+
+      const allowedPost = document.createElement("gg-post");
+      allowedPost.id = "lazy-allowed-post";
+      allowedPost.innerHTML = `
+        <article class="post">
+          <header class="post-header"><a href="/profile/Allowed">Allowed</a></header>
+          <div class="post-body">
+            <gg-markup-quote id="lazy-blocked-quote">
+              <div class="c-header"><span class="user-attribution">Loading attribution</span></div>
+              <gg-markup-content>Blocked quotation</gg-markup-content>
+            </gg-markup-quote>
+            <p id="lazy-allowed-reply">Allowed reply</p>
+          </div>
+        </article>`;
+      feed.append(allowedPost);
+
+      setTimeout(() => {
+        const body = blockedPost.querySelector(".post-body");
+        body.innerHTML = `
+          <span ngbtooltip="You've blocked content from this user">Blocked User</span>
+          <button type="button">Show hidden post</button>`;
+
+        const attribution = allowedPost.querySelector(".user-attribution");
+        attribution.firstChild.data = "Muted User\n@Muted User";
+      }, 50);
+
+      setTimeout(() => {
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(
+          !document.getElementById("lazy-blocked-post"),
+          "post assembled after insertion was not removed"
+        );
+        check(
+          !document.getElementById("lazy-blocked-quote"),
+          "quote attribution populated as text later was not removed"
+        );
+        check(Boolean(document.getElementById("lazy-allowed-reply")), "allowed reply was removed");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures });
+      }, 180);
+    </script>
+  </body>
+</html>

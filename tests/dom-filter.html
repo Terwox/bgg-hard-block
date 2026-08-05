@@ -33,7 +33,15 @@
         <article class="post">
           <div class="post-body">
             <span>Blocked User</span>
-            <button type="button">Show Anyway</button>
+            <button type="button">Show hidden post</button>
+          </div>
+        </article>
+      </gg-post>
+
+      <gg-post id="semantic-placeholder">
+        <article class="post">
+          <div class="post-body">
+            <span ngbtooltip="You've blocked content from this user">Blocked User</span>
           </div>
         </article>
       </gg-post>
@@ -59,10 +67,11 @@
         if (!condition) failures.push(message);
       };
 
-      check(result.posts === 2, `expected 2 removed posts, got ${result.posts}`);
+      check(result.posts === 3, `expected 3 removed posts, got ${result.posts}`);
       check(result.quotes === 1, `expected 1 removed quote, got ${result.quotes}`);
       check(!document.getElementById("blocked-direct-post"), "blocked author's post remains");
       check(!document.getElementById("native-placeholder"), "native placeholder remains");
+      check(!document.getElementById("semantic-placeholder"), "semantic placeholder remains");
       check(!document.getElementById("blocked-quote"), "blocked quotation remains");
       check(Boolean(document.getElementById("allowed-with-blocked-quote")), "replying post was removed");
       check(Boolean(document.getElementById("allowed-reply")), "allowed reply was removed");
