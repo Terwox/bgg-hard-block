@@ -1,15 +1,14 @@
 {
   "manifest_version": 3,
   "name": "BGG Hard Block",
-  "version": "0.3.2",
-  "description": "Hard-removes hidden users from BGG forums and optionally links them to subscription blocks.",
+  "version": "0.3.3",
+  "description": "Hard-removes hidden users from BGG discussions and optionally links them to subscription blocks.",
   "minimum_chrome_version": "111",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
-    "*://boardgamegeek.com/*",
-    "*://www.boardgamegeek.com/*"
+    "https://boardgamegeek.com/*"
   ],
   "background": {
     "service_worker": "src/background.js"
@@ -37,8 +36,12 @@
   "content_scripts": [
     {
       "matches": [
-        "*://boardgamegeek.com/*",
-        "*://www.boardgamegeek.com/*"
+        "https://boardgamegeek.com/thread/*",
+        "https://boardgamegeek.com/geeklist/*",
+        "https://boardgamegeek.com/image/*",
+        "https://boardgamegeek.com/video/*",
+        "https://boardgamegeek.com/filepage/*",
+        "https://boardgamegeek.com/blog/*/blogpost/*"
       ],
       "js": [
         "src/page-bridge.js"
@@ -48,8 +51,12 @@
     },
     {
       "matches": [
-        "*://boardgamegeek.com/*",
-        "*://www.boardgamegeek.com/*"
+        "https://boardgamegeek.com/thread/*",
+        "https://boardgamegeek.com/geeklist/*",
+        "https://boardgamegeek.com/image/*",
+        "https://boardgamegeek.com/video/*",
+        "https://boardgamegeek.com/filepage/*",
+        "https://boardgamegeek.com/blog/*/blogpost/*"
       ],
       "js": [
         "src/settings-bridge.js"
@@ -59,14 +66,12 @@
     },
     {
       "matches": [
-        "*://boardgamegeek.com/forum/*",
-        "*://boardgamegeek.com/forums*",
-        "*://boardgamegeek.com/thread/*",
-        "*://boardgamegeek.com/threads/*",
-        "*://www.boardgamegeek.com/forum/*",
-        "*://www.boardgamegeek.com/forums*",
-        "*://www.boardgamegeek.com/thread/*",
-        "*://www.boardgamegeek.com/threads/*"
+        "https://boardgamegeek.com/thread/*",
+        "https://boardgamegeek.com/geeklist/*",
+        "https://boardgamegeek.com/image/*",
+        "https://boardgamegeek.com/video/*",
+        "https://boardgamegeek.com/filepage/*",
+        "https://boardgamegeek.com/blog/*/blogpost/*"
       ],
       "css": [
         "src/content.css"

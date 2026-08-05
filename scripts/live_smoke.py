@@ -97,8 +97,8 @@ async def seed_cached_block_list(websocket_url: str) -> None:
           chrome.storage.local.set({{
             bggHardBlockerConsent: {{
               granted: true,
-              disclosureVersion: '2026-08-04',
-              grantedAt: '2026-08-04T00:00:00.000Z'
+              disclosureVersion: '2026-08-05',
+              grantedAt: '2026-08-05T00:00:00.000Z'
             }},
             bggHardBlockerOptions: {{
               linkSubscriptionBlocks: true
@@ -364,7 +364,7 @@ def main() -> int:
     if not consent_refresh:
         failures.append("granting consent did not hard-refresh the open BGG tab")
     if not page.get("ready"):
-        failures.append("extension did not reveal the forum page")
+        failures.append("extension did not reveal the discussion page")
     if mode == "live":
         if page.get("matchingPosts") != 0:
             failures.append("seeded blocked user's direct posts remain")

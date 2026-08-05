@@ -2,7 +2,7 @@
   "use strict";
 
   const CONSENT_KEY = "bggHardBlockerConsent";
-  const DISCLOSURE_VERSION = "2026-08-04";
+  const DISCLOSURE_VERSION = "2026-08-05";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const agree = document.getElementById("agree");
   const linking = document.getElementById("link-subscription-blocks");
@@ -20,7 +20,7 @@
         linkSubscriptionBlocks: linking.checked
       }
     });
-    status.textContent = "Enabled. Open BGG forum tabs are refreshing now.";
+    status.textContent = "Enabled. Open BGG discussion tabs are refreshing now.";
     agree.textContent = "BGG Hard Block is enabled";
   });
 

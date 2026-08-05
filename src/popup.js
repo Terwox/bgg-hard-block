@@ -2,7 +2,7 @@
   "use strict";
 
   const CONSENT_KEY = "bggHardBlockerConsent";
-  const DISCLOSURE_VERSION = "2026-08-04";
+  const DISCLOSURE_VERSION = "2026-08-05";
   const STORAGE_KEY = "bggHardBlockerState";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
@@ -59,7 +59,7 @@
       `${subscription.failedCount || 0} hidden users could not be linked.`;
   } else if (subscription?.state === "error") {
     elements.subscription.textContent = "Error";
-    elements.subscriptionNote.textContent = "Latest linking attempt failed; forum blocking is still active.";
+    elements.subscriptionNote.textContent = "Latest linking attempt failed; discussion blocking is still active.";
   } else if (subscription?.state === "syncing") {
     elements.subscription.textContent = "Syncing";
     elements.subscriptionNote.textContent = "Linking hidden users to subscription blocks…";
@@ -81,5 +81,5 @@
     timeout: "BGG sync timed out",
     waiting: "Waiting for BGG"
   };
-  elements.state.textContent = labels[status.source] || "Active on BGG forums";
+  elements.state.textContent = labels[status.source] || "Active on BGG discussions";
 })();
