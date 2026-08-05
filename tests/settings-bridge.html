@@ -10,7 +10,7 @@
         storage: {
           local: {
             async get() {
-              return {};
+              return currentStorage;
             },
             async set(value) {
               writes.push(value);
@@ -23,6 +23,7 @@
           }
         }
       };
+      const currentStorage = {};
     </script>
     <script src="../src/settings-bridge.js"></script>
   </head>
@@ -36,45 +37,57 @@
         const settings = document.getElementById("bgg-hard-blocker-settings");
         const initial = JSON.parse(settings?.getAttribute("content") || "null");
 
-        check(initial?.linkSubscriptionBlocks === true, "subscription linking did not default on");
+        check(initial?.consentGranted === false, "consent unexpectedly defaulted on");
+        check(initial?.linkSubscriptionBlocks === false, "linking started before consent");
         check(listeners.length === 1, "storage changes are not observed");
 
+        currentStorage.bggHardBlockerConsent = {
+          granted: true,
+          disclosureVersion: "2026-08-04"
+        };
+        currentStorage.bggHardBlockerOptions = { linkSubscriptionBlocks: false };
         listeners[0](
           {
+            bggHardBlockerConsent: {
+              newValue: currentStorage.bggHardBlockerConsent
+            },
             bggHardBlockerOptions: {
-              newValue: { linkSubscriptionBlocks: false }
+              newValue: currentStorage.bggHardBlockerOptions
             }
           },
           "local"
         );
-        const updated = JSON.parse(settings?.getAttribute("content") || "null");
-        check(updated?.linkSubscriptionBlocks === false, "stored opt-out was not published");
-
-        const data = document.createElement("meta");
-        data.id = "bgg-hard-blocker-data";
-        data.setAttribute(
-          "content",
-          JSON.stringify({
-            subscriptionLinking: {
-              enabled: true,
-              state: "synced",
-              hiddenCount: 2,
-              subscriptionBlockedCount: 2,
-              addedCount: 1,
-              failedCount: 0
-            }
-          })
-        );
-        document.documentElement.appendChild(data);
-        document.dispatchEvent(new CustomEvent("bgg-hard-blocker:blocklist"));
-
         setTimeout(() => {
-          check(
-            writes.at(-1)?.bggHardBlockerSubscriptionState?.state === "synced",
-            "subscription status was not saved"
+          const updated = JSON.parse(settings?.getAttribute("content") || "null");
+          check(updated?.consentGranted === true, "stored consent was not published");
+          check(updated?.linkSubscriptionBlocks === false, "stored opt-out was not published");
+
+          const data = document.createElement("meta");
+          data.id = "bgg-hard-blocker-data";
+          data.setAttribute(
+            "content",
+            JSON.stringify({
+              subscriptionLinking: {
+                enabled: true,
+                state: "synced",
+                hiddenCount: 2,
+                subscriptionBlockedCount: 2,
+                addedCount: 1,
+                failedCount: 0
+              }
+            })
           );
-          document.body.dataset.status = failures.length ? "fail" : "pass";
-          document.body.dataset.report = JSON.stringify({ failures, writes });
+          document.documentElement.appendChild(data);
+          document.dispatchEvent(new CustomEvent("bgg-hard-blocker:blocklist"));
+
+          setTimeout(() => {
+            check(
+              writes.at(-1)?.bggHardBlockerSubscriptionState?.state === "synced",
+              "subscription status was not saved"
+            );
+            document.body.dataset.status = failures.length ? "fail" : "pass";
+            document.body.dataset.report = JSON.stringify({ failures, writes });
+          }, 25);
         }, 25);
       }, 50);
     </script>

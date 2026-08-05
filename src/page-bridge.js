@@ -17,6 +17,8 @@
 
   let authHeader = "";
   let attemptedAuthHeader = "";
+  let consentGranted = false;
+  let interceptorsInstalled = false;
   let lastBlockListPayload = null;
   let linkSubscriptionBlocks = null;
   let subscriptionResyncRequested = false;
@@ -64,6 +66,7 @@
 
   function captureAuthorization(name, value) {
     if (
+      !consentGranted ||
       String(name).toLowerCase() !== "authorization" ||
       typeof value !== "string" ||
       !value.startsWith(AUTH_PREFIX)
@@ -315,10 +318,19 @@
 
   function acceptSettingsPayload() {
     const settings = readSettingsPayload();
-    if (typeof settings?.linkSubscriptionBlocks !== "boolean") {
+    if (typeof settings?.consentGranted !== "boolean") {
       return;
     }
 
+    consentGranted = settings.consentGranted;
+    if (!consentGranted) {
+      authHeader = "";
+      attemptedAuthHeader = "";
+      linkSubscriptionBlocks = false;
+      return;
+    }
+
+    installInterceptors();
     linkSubscriptionBlocks = settings.linkSubscriptionBlocks;
     if (!linkSubscriptionBlocks) {
       publishSubscriptionLinking({
@@ -399,57 +411,65 @@
     return syncPromise;
   }
 
+  function installInterceptors() {
+    if (interceptorsInstalled) {
+      return;
+    }
+    interceptorsInstalled = true;
+
+    XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
+      xhrMetadata.set(this, {
+        method: String(method || "GET").toUpperCase(),
+        url: String(url || "")
+      });
+
+      this.addEventListener(
+        "loadend",
+        () => {
+          const metadata = xhrMetadata.get(this);
+          if (
+            consentGranted &&
+            metadata?.url.includes("/api/userblock") &&
+            metadata.method !== "GET" &&
+            this.status >= 200 &&
+            this.status < 300
+          ) {
+            syncBlockList(true);
+          }
+        },
+        { once: true }
+      );
+
+      return originalXhrOpen.call(this, method, url, ...rest);
+    };
+
+    XMLHttpRequest.prototype.setRequestHeader = function patchedSetRequestHeader(name, value) {
+      captureAuthorization(name, value);
+      return originalXhrSetRequestHeader.call(this, name, value);
+    };
+
+    window.fetch = function patchedFetch(input, init) {
+      if (input instanceof Request) {
+        inspectHeaders(input.headers);
+      }
+      inspectHeaders(init?.headers);
+
+      const method = String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const url = String(input instanceof Request ? input.url : input);
+      const request = originalFetch(input, init);
+
+      if (consentGranted && url.includes("/api/userblock") && method !== "GET") {
+        request.then((response) => {
+          if (response.ok) {
+            syncBlockList(true);
+          }
+        });
+      }
+
+      return request;
+    };
+  }
+
   document.addEventListener(SETTINGS_EVENT, acceptSettingsPayload);
   acceptSettingsPayload();
-
-  XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
-    xhrMetadata.set(this, {
-      method: String(method || "GET").toUpperCase(),
-      url: String(url || "")
-    });
-
-    this.addEventListener(
-      "loadend",
-      () => {
-        const metadata = xhrMetadata.get(this);
-        if (
-          metadata?.url.includes("/api/userblock") &&
-          metadata.method !== "GET" &&
-          this.status >= 200 &&
-          this.status < 300
-        ) {
-          syncBlockList(true);
-        }
-      },
-      { once: true }
-    );
-
-    return originalXhrOpen.call(this, method, url, ...rest);
-  };
-
-  XMLHttpRequest.prototype.setRequestHeader = function patchedSetRequestHeader(name, value) {
-    captureAuthorization(name, value);
-    return originalXhrSetRequestHeader.call(this, name, value);
-  };
-
-  window.fetch = function patchedFetch(input, init) {
-    if (input instanceof Request) {
-      inspectHeaders(input.headers);
-    }
-    inspectHeaders(init?.headers);
-
-    const method = String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-    const url = String(input instanceof Request ? input.url : input);
-    const request = originalFetch(input, init);
-
-    if (url.includes("/api/userblock") && method !== "GET") {
-      request.then((response) => {
-        if (response.ok) {
-          syncBlockList(true);
-        }
-      });
-    }
-
-    return request;
-  };
 })();

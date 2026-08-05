@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Set up BGG Hard Block</title>
+    <link rel="stylesheet" href="onboarding.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="../icons/icon-128.png" width="80" height="80" alt="">
+        <div>
+          <p class="eyebrow">One-time setup</p>
+          <h1>Make BGG blocks actually disappear.</h1>
+          <p class="lede">BGG Hard Block needs your permission before it processes anything on BoardGameGeek.</p>
+        </div>
+      </header>
+
+      <section aria-labelledby="disclosure-title">
+        <h2 id="disclosure-title">What the extension handles</h2>
+        <ul>
+          <li><strong>Your BGG Hidden Users list</strong> and the public usernames it contains.</li>
+          <li><strong>Forum page content and author attributions</strong> so blocked posts, placeholders, and quotations can be removed.</li>
+          <li><strong>Your logged-in BGG authorization value</strong>, used only in page memory to call BGG’s own application programming interface (API). It is never saved or exposed to the extension’s isolated scripts.</li>
+          <li><strong>Local extension state</strong>, including blocked usernames, settings, synchronization times, and removal counts.</li>
+        </ul>
+        <p class="boundary">Nothing is sent to Terwox or any third party. There are no ads, analytics, telemetry, or remote code.</p>
+      </section>
+
+      <label class="toggle-row">
+        <span>
+          <strong>Also add Hidden Users to BGG subscription blocks</strong>
+          <small>On by default. This adds missing user-level blocks to your BGG account. Turning it off later stops future additions but does not remove blocks already added.</small>
+        </span>
+        <input id="link-subscription-blocks" type="checkbox" checked>
+      </label>
+
+      <div class="actions">
+        <button id="agree" type="button">Agree and enable BGG Hard Block</button>
+        <a href="https://terwox.github.io/bgg-hard-block/privacy/" target="_blank" rel="noreferrer">Read the privacy policy</a>
+      </div>
+      <p id="status" class="status" role="status"></p>
+      <p class="footnote">If you do not agree, close this tab. The extension will remain inactive and will not process BGG data.</p>
+    </main>
+    <script src="onboarding.js"></script>
+  </body>
+</html>

@@ -1,7 +1,9 @@
-(function runBggHardBlocker() {
+(async function runBggHardBlocker() {
   "use strict";
 
   const core = globalThis.BggHardBlockerCore;
+  const CONSENT_KEY = "bggHardBlockerConsent";
+  const DISCLOSURE_VERSION = "2026-08-04";
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
   const STORAGE_KEY = "bggHardBlockerState";
@@ -10,6 +12,18 @@
   const POST_LOAD_MAX_HOLD_MS = 500;
 
   if (!core || !document.documentElement) {
+    return;
+  }
+
+  try {
+    const storedConsent = await chrome.storage.local.get(CONSENT_KEY);
+    const consent = storedConsent?.[CONSENT_KEY];
+    if (consent?.granted !== true || consent?.disclosureVersion !== DISCLOSURE_VERSION) {
+      document.documentElement.setAttribute(READY_ATTRIBUTE, "");
+      return;
+    }
+  } catch (_error) {
+    document.documentElement.setAttribute(READY_ATTRIBUTE, "");
     return;
   }
 

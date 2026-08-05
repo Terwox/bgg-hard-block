@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Onboarding consent test</title>
+    <script>
+      const writes = [];
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() { return {}; },
+            async set(value) { writes.push(value); }
+          }
+        }
+      };
+    </script>
+  </head>
+  <body data-status="running">
+    <input id="link-subscription-blocks" type="checkbox" checked>
+    <button id="agree" type="button">Agree</button>
+    <p id="status"></p>
+    <script src="../src/onboarding.js"></script>
+    <script>
+      setTimeout(() => document.getElementById("agree").click(), 25);
+      setTimeout(() => {
+        const failures = [];
+        const saved = writes.at(-1) || {};
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(saved.bggHardBlockerConsent?.granted === true, "affirmative consent was not stored");
+        check(
+          saved.bggHardBlockerConsent?.disclosureVersion === "2026-08-04",
+          "wrong disclosure version was stored"
+        );
+        check(
+          saved.bggHardBlockerOptions?.linkSubscriptionBlocks === true,
+          "subscription choice was not stored"
+        );
+        check(/Enabled/.test(document.getElementById("status").textContent), "success status was not shown");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, saved });
+      }, 100);
+    </script>
+  </body>
+</html>

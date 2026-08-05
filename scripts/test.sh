@@ -32,7 +32,7 @@ for script in "$repo_dir"/src/*.js; do
   node --check "$script"
 done
 
-for fixture in dom-filter page-bridge settings-bridge subscription-linking-disabled content-runtime cache-hold; do
+for fixture in dom-filter consent-gate onboarding page-bridge settings-bridge subscription-linking-disabled content-runtime cache-hold; do
   python3 "$repo_dir/scripts/browser_test.py" \
     --chrome "$chrome_bin" \
     "$repo_dir/tests/$fixture.html"

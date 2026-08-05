@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Consent gate test</title>
+    <meta id="bgg-hard-blocker-settings" content='{"consentGranted":false,"linkSubscriptionBlocks":false}'>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      const calls = [];
+      const writes = [];
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() { return {}; },
+            async set(value) { writes.push(value); }
+          }
+        }
+      };
+      window.fetch = async (input, init = {}) => {
+        const url = String(input instanceof Request ? input.url : input);
+        calls.push({ url, headers: new Headers(init.headers || {}) });
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      };
+    </script>
+    <script src="../src/page-bridge.js"></script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <gg-post id="consent-placeholder">
+      <article class="post">
+        <div class="post-body"><span>Blocked User</span><button>Show Anyway</button></div>
+      </article>
+    </gg-post>
+    <script>
+      fetch("https://api.geekdo.com/api/thread/123", {
+        headers: { Authorization: "GeekAuth must-not-be-captured" }
+      });
+
+      setTimeout(() => {
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"), "page stayed hidden");
+        check(Boolean(document.getElementById("consent-placeholder")), "content was filtered before consent");
+        check(!document.getElementById("bgg-hard-blocker-data"), "block-list data was published before consent");
+        check(!calls.some((call) => call.url.endsWith("/api/userblock")), "block list was requested before consent");
+        check(writes.length === 0, "page state was stored before consent");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, calls, writes });
+      }, 150);
+    </script>
+  </body>
+</html>

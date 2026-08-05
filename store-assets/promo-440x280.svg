@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="280" viewBox="0 0 440 280">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#123b5d"/>
+      <stop offset="1" stop-color="#0a263d"/>
+    </linearGradient>
+  </defs>
+  <rect width="440" height="280" fill="url(#bg)"/>
+  <circle cx="382" cy="-4" r="132" fill="#ffffff" opacity="0.035"/>
+  <circle cx="24" cy="286" r="110" fill="#e34949" opacity="0.08"/>
+
+  <g transform="translate(30 34) scale(.82)">
+    <rect width="128" height="128" rx="28" fill="#f7fafc"/>
+    <path d="M27 31h74a11 11 0 0 1 11 11v39a11 11 0 0 1-11 11H66L43 108V92H27a11 11 0 0 1-11-11V42a11 11 0 0 1 11-11Z" fill="#e8eef3"/>
+    <path d="M31 61h66M31 76h47" fill="none" stroke="#7a8c9b" stroke-linecap="round" stroke-width="8"/>
+    <path d="m22 21 84 86" fill="none" stroke="#e34949" stroke-linecap="round" stroke-width="13"/>
+  </g>
+
+  <text x="158" y="77" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="700">BGG Hard Block</text>
+  <text x="158" y="113" fill="#c7d7e4" font-family="Arial, Helvetica, sans-serif" font-size="18">Blocked means gone.</text>
+
+  <line x1="30" y1="170" x2="410" y2="170" stroke="#ffffff" opacity="0.18"/>
+  <text x="30" y="211" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" letter-spacing="1.8">FREE  ·  PRIVATE  ·  NO ADS</text>
+  <text x="30" y="244" fill="#9fb8ca" font-family="Arial, Helvetica, sans-serif" font-size="13">Unofficial BoardGameGeek forum extension by Terwox</text>
+</svg>
