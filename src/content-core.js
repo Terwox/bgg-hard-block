@@ -125,16 +125,23 @@
       return false;
     }
 
+    const semanticBlockedMarker = body.querySelector(
+      ':scope > [ngbtooltip*="blocked content" i]'
+    );
+    if (semanticBlockedMarker) {
+      return true;
+    }
+
     const bodyText = (body.textContent || body.innerText || "")
       .replace(/\s+/g, " ")
       .trim();
-    const buttonText = Array.from(body.querySelectorAll("button"))
+    const revealText = Array.from(body.querySelectorAll(":scope > button, :scope > a"))
       .map((button) => (button.textContent || button.innerText || "").trim())
       .join(" ");
 
     return (
       /\bBlocked User/i.test(bodyText) &&
-      /\bShow Anyway\b/i.test(buttonText)
+      /\b(?:Show Anyway|Show (?:hidden|blocked) (?:post|content))\b/i.test(revealText)
     );
   }
 

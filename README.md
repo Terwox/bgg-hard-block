@@ -18,7 +18,7 @@ On first install, the extension opens a one-time privacy disclosure. It does not
 read or filter BGG data until the user affirmatively agrees. A changed disclosure
 version disables processing until the user reviews and accepts the new version.
 
-The forum body remains hidden until the first filtering pass completes, so blocked content does not flash onscreen. Live synchronization can reveal it immediately; otherwise it is revealed no later than 500 ms after `DOMContentLoaded`. A two-second CSS failsafe prevents broken JavaScript or changed BGG markup from leaving the site permanently blank.
+The forum body remains hidden until the first filtering pass completes, so blocked content does not flash onscreen. Live synchronization can reveal it immediately; otherwise it is revealed no later than 500 ms after `DOMContentLoaded`. After that ceiling, the extension watches each lazy-loaded post and quotation in place. A semantic CSS guard suppresses BGG's native blocked placeholder immediately, while the mutation filter rechecks the owning post or quotation as its text, links, and attributes arrive. A two-second CSS failsafe prevents broken JavaScript or changed BGG markup from leaving the site permanently blank.
 
 ## Install locally
 
@@ -66,7 +66,8 @@ The test suite has no package dependencies. It uses a local headless Chromium in
 It covers native BGG placeholders, full blocked-author posts, blocked quotations
 inside allowed replies, username normalization, authenticated API bridging,
 credential non-disclosure, pre-consent inactivity, affirmative onboarding,
-default-on and opt-out subscription linking, page reveal behavior, and status storage.
+default-on and opt-out subscription linking, page reveal behavior, lazy post and
+quotation assembly, and status storage.
 
 An optional networked smoke test loads the unpacked extension into a disposable Chromium profile, seeds a temporary test username, and verifies post and quote removal against a live BGG thread. If BGG gives headless Chromium a Cloudflare challenge, the test keeps the real extension loaded on the BGG origin and substitutes the live markup shape captured during development:
 
@@ -84,10 +85,11 @@ The release ZIP is written to `artifacts/` and excludes tests and development fi
 
 ## Current BGG assumptions
 
-The implementation was checked against BGG's live Angular forum markup on August 4, 2026:
+The implementation was checked against BGG's live Angular forum markup on August 5, 2026:
 
 - posts are wrapped in `gg-post` with an `article.post`
-- native blocked posts render `Blocked User` and `Show Anyway`
+- native blocked posts render `Blocked User`, `Show Anyway`, and an
+  `ngbtooltip` marker describing blocked content
 - quotations use `gg-markup-quote` and `.user-attribution`
 - the authenticated block-list endpoint returns numeric user IDs
 - `/api/user/{id}` returns the corresponding public username

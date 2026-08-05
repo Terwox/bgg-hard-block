@@ -6,6 +6,11 @@ html:not([data-bgg-hard-blocker-ready]):not([data-bgg-hard-blocker-running]) bod
   animation: bgg-hard-blocker-failsafe 0s linear 2s forwards;
 }
 
+html[data-bgg-hard-blocker-running]
+  gg-post:has(> article.post > .post-body > [ngbtooltip*="blocked content" i]) {
+  display: none !important;
+}
+
 @keyframes bgg-hard-blocker-failsafe {
   to {
     visibility: visible;

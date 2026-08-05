@@ -9,6 +9,7 @@
   const STORAGE_KEY = "bggHardBlockerState";
   const READY_ATTRIBUTE = "data-bgg-hard-blocker-ready";
   const RUNNING_ATTRIBUTE = "data-bgg-hard-blocker-running";
+  const FILTERABLE_SELECTOR = "gg-post, article.post, gg-markup-quote";
   const POST_LOAD_MAX_HOLD_MS = 500;
 
   if (!core || !document.documentElement) {
@@ -152,16 +153,49 @@
 
   document.addEventListener(DATA_EVENT, acceptBridgePayload);
 
+  function collectMutationRoot(node, roots) {
+    const element =
+      node?.nodeType === Node.ELEMENT_NODE
+        ? node
+        : node?.nodeType === Node.TEXT_NODE
+          ? node.parentElement
+          : null;
+
+    if (!element) {
+      return;
+    }
+
+    const owner = element.closest(FILTERABLE_SELECTOR);
+    if (owner) {
+      roots.add(owner);
+    } else if (element.querySelector(FILTERABLE_SELECTOR)) {
+      roots.add(element);
+    }
+  }
+
   const observer = new MutationObserver((records) => {
+    const roots = new Set();
+
     for (const record of records) {
+      collectMutationRoot(record.target, roots);
       for (const node of record.addedNodes) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          filter(node);
-        }
+        collectMutationRoot(node, roots);
+      }
+    }
+
+    for (const root of roots) {
+      if (root.isConnected) {
+        filter(root);
       }
     }
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["content", "data-username", "href", "ngbtooltip"],
+    characterData: true,
+    childList: true,
+    subtree: true
+  });
 
   if (globalThis.chrome?.storage?.local?.get) {
     chrome.storage.local
