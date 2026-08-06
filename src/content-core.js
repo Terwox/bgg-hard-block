@@ -11,6 +11,7 @@
 
   const POST_SELECTOR = "gg-post, article.post";
   const QUOTE_SELECTOR = "gg-markup-quote";
+  const BBCODE_QUOTE_TOKEN = /\[(\/?)q(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\]\r\n]+?)))?\s*\]/gi;
 
   function normalizeUsername(value) {
     if (typeof value !== "string") {
@@ -181,6 +182,60 @@
     );
   }
 
+  function sanitizeBlockedQuotes(value, blockedUsernames) {
+    if (typeof value !== "string" || !value) {
+      return typeof value === "string" ? value : "";
+    }
+
+    const blocked = makeBlockedSet(blockedUsernames);
+    if (!blocked.size) {
+      return value;
+    }
+
+    const stack = [];
+    const ranges = [];
+    BBCODE_QUOTE_TOKEN.lastIndex = 0;
+
+    for (let match = BBCODE_QUOTE_TOKEN.exec(value); match; match = BBCODE_QUOTE_TOKEN.exec(value)) {
+      if (match[1]) {
+        const opening = stack.pop();
+        if (opening?.blocked) {
+          ranges.push([opening.start, BBCODE_QUOTE_TOKEN.lastIndex]);
+        }
+        continue;
+      }
+
+      const username = normalizeUsername(match[2] ?? match[3] ?? match[4] ?? "");
+      stack.push({
+        blocked: Boolean(username && blocked.has(username)),
+        start: match.index
+      });
+    }
+
+    if (!ranges.length) {
+      return value;
+    }
+
+    ranges.sort((left, right) => left[0] - right[0]);
+    const merged = [];
+    for (const range of ranges) {
+      const previous = merged.at(-1);
+      if (previous && range[0] <= previous[1]) {
+        previous[1] = Math.max(previous[1], range[1]);
+      } else {
+        merged.push([...range]);
+      }
+    }
+
+    let cursor = 0;
+    let sanitized = "";
+    for (const [start, end] of merged) {
+      sanitized += value.slice(cursor, start);
+      cursor = end;
+    }
+    return sanitized + value.slice(cursor);
+  }
+
   function filterDom(root, blockedUsernames) {
     const blocked =
       blockedUsernames instanceof Set
@@ -222,6 +277,7 @@
     normalizeUsername,
     postUsername,
     quoteUsername,
+    sanitizeBlockedQuotes,
     usernameFromProfileHref
   });
 });

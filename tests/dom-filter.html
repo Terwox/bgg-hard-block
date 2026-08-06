@@ -81,6 +81,29 @@
         "encoded profile username was not normalized"
       );
 
+      const nestedDraft = `[q="Allowed Reply"]
+[q="Muted User"][q="Earlier User"]Earlier quotation[/q]
+Blocked user's words.[/q]
+Allowed reply survives.
+[q="Someone Else"]Allowed sibling quotation.[/q]
+[/q]`;
+      const expectedDraft = `[q="Allowed Reply"]
+
+Allowed reply survives.
+[q="Someone Else"]Allowed sibling quotation.[/q]
+[/q]`;
+      check(
+        BggHardBlockerCore.sanitizeBlockedQuotes(nestedDraft, ["@muted user"]) === expectedDraft,
+        "blocked BBCode quote subtree was not removed cleanly"
+      );
+      check(
+        BggHardBlockerCore.sanitizeBlockedQuotes(
+          '[q="Muted User"]unclosed quotation',
+          ["Muted User"]
+        ) === '[q="Muted User"]unclosed quotation',
+        "unbalanced BBCode was destructively removed"
+      );
+
       document.body.dataset.status = failures.length ? "fail" : "pass";
       document.body.dataset.report = JSON.stringify({ failures, result });
     </script>

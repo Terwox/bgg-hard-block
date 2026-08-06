@@ -6,7 +6,9 @@ const CONSENT_KEY = "bggHardBlockerConsent";
 const LOADED_EXTENSION_VERSION = chrome.runtime.getManifest?.().version || "";
 const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
   ? "2026-08-04"
-  : "2026-08-05";
+  : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION)
+    ? "2026-08-05"
+    : "2026-08-06";
 const DISCUSSION_TAB_PATTERNS = [
   "https://boardgamegeek.com/thread/*",
   "https://boardgamegeek.com/geeklist/*",

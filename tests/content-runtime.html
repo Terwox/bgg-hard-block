@@ -14,7 +14,7 @@
               return {
                 bggHardBlockerConsent: {
                   granted: true,
-                  disclosureVersion: "2026-08-05"
+                  disclosureVersion: "2026-08-06"
                 },
                 bggHardBlockerState: {
                   usernames: ["Muted User"],
@@ -52,7 +52,46 @@
         </div>
       </article>
     </gg-post>
+    <gg-post id="runtime-quote-source">
+      <article class="post">
+        <header class="post-header"><a href="/profile/Allowed%20Reply">Allowed Reply</a></header>
+        <div class="post-body">Visible allowed reply</div>
+        <button id="runtime-quote-button" type="button" class="post-btn"> Quote </button>
+      </article>
+    </gg-post>
+    <div id="runtime-composer"></div>
     <script>
+      const rawQuoteDraft = `[q="Allowed Reply"]
+[q="Muted User"][q="Earlier User"]Earlier quotation[/q]
+Blocked user's words.[/q]
+Allowed reply survives.
+[q="Someone Else"]Allowed sibling quotation.[/q]
+[/q]
+`;
+      const expectedQuoteDraft = `[q="Allowed Reply"]
+
+Allowed reply survives.
+[q="Someone Else"]Allowed sibling quotation.[/q]
+[/q]
+`;
+      let quoteEditorInputEvents = 0;
+
+      document.getElementById("runtime-quote-button").addEventListener("click", () => {
+        setTimeout(() => {
+          const textarea = document.createElement("textarea");
+          textarea.id = "runtime-quote-editor";
+          textarea.name = "text";
+          textarea.className = "post-textarea";
+          textarea.value = rawQuoteDraft;
+          textarea.addEventListener("input", () => {
+            quoteEditorInputEvents += 1;
+          });
+          document.getElementById("runtime-composer").append(textarea);
+        }, 0);
+      });
+
+      setTimeout(() => document.getElementById("runtime-quote-button").click(), 25);
+
       setTimeout(() => {
         const failures = [];
         const check = (condition, message) => {
@@ -67,13 +106,20 @@
         const status = writes.at(-1)?.bggHardBlockerState?.status;
         check(status?.hiddenPosts === 1, `expected 1 hidden post, got ${status?.hiddenPosts}`);
         check(status?.hiddenQuotes === 1, `expected 1 hidden quote, got ${status?.hiddenQuotes}`);
+        const quoteEditor = document.getElementById("runtime-quote-editor");
+        check(Boolean(quoteEditor), "BGG-style quote editor was not created");
+        check(
+          quoteEditor?.value === expectedQuoteDraft,
+          `blocked quote returned in composer: ${JSON.stringify(quoteEditor?.value)}`
+        );
+        check(quoteEditorInputEvents === 1, "sanitized quote did not update the editor model once");
 
         document.body.dataset.status = failures.length ? "fail" : "pass";
         document.body.dataset.report = JSON.stringify({
           failures,
           stored: writes.at(-1)
         });
-      }, 150);
+      }, 650);
     </script>
   </body>
 </html>

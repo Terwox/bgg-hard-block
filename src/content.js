@@ -12,13 +12,18 @@
   const LOADED_EXTENSION_VERSION = chrome.runtime?.getManifest?.().version || "";
   const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
     ? "2026-08-04"
-    : "2026-08-05";
+    : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION)
+      ? "2026-08-05"
+      : "2026-08-06";
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
   const STORAGE_KEY = "bggHardBlockerState";
   const READY_ATTRIBUTE = "data-bgg-hard-blocker-ready";
   const RUNNING_ATTRIBUTE = "data-bgg-hard-blocker-running";
   const FILTERABLE_SELECTOR = "gg-post, article.post, gg-markup-quote";
+  const QUOTE_BUTTON_SELECTOR = "gg-post button.post-btn";
+  const QUOTE_EDITOR_SELECTOR = "textarea.post-textarea[name=\"text\"]";
+  const QUOTE_SANITIZE_DELAYS_MS = [0, 25, 100, 250, 500];
   const POST_LOAD_MAX_HOLD_MS = 500;
 
   if (!core || !document.documentElement) {
@@ -135,6 +140,55 @@
     scheduleStatusWrite();
     return true;
   }
+
+  function setTextareaValue(textarea, value) {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
+    )?.set;
+
+    if (setter) {
+      setter.call(textarea, value);
+    } else {
+      textarea.value = value;
+    }
+
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function sanitizeQuoteEditors() {
+    for (const textarea of document.querySelectorAll(QUOTE_EDITOR_SELECTOR)) {
+      const sanitized = core.sanitizeBlockedQuotes(textarea.value, blockedUsernames);
+      if (sanitized !== textarea.value) {
+        setTextareaValue(textarea, sanitized);
+      }
+    }
+  }
+
+  function isPostQuoteButton(target) {
+    const button = target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest?.("button")
+      : target?.parentElement?.closest?.("button");
+
+    return Boolean(
+      button?.matches(QUOTE_BUTTON_SELECTOR) &&
+      (button.textContent || button.innerText || "").trim() === "Quote"
+    );
+  }
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!isPostQuoteButton(event.target)) {
+        return;
+      }
+
+      for (const delay of QUOTE_SANITIZE_DELAYS_MS) {
+        window.setTimeout(sanitizeQuoteEditors, delay);
+      }
+    },
+    true
+  );
 
   function readBridgePayload() {
     const element = document.getElementById(DATA_ELEMENT_ID);
