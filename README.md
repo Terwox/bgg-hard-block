@@ -9,6 +9,7 @@ It removes:
 - BGG's `Blocked User / Show Anyway` placeholder posts
 - complete posts or comments authored by anyone on the signed-in user's BGG block list
 - quotations attributed to blocked users while preserving the surrounding reply
+- blocked quotation subtrees from the reply draft BGG creates when the user clicks **Quote**
 
 By default, it also adds every BGG Hidden User to BGG's separate user-level
 subscription block list. This is a one-way safety rule: disabling the option stops
@@ -68,6 +69,13 @@ the same filter to posts loaded dynamically. Profile ID-to-name mappings are cac
 for 30 days in BGG's own local storage to avoid repeating every public profile
 request on every page.
 
+After the user clicks BGG's **Quote** button, the content script locally parses the
+nested `[q="username"]...[/q]` text BGG inserts into the reply editor. It removes
+each complete blocked-user quote subtree—including quotations nested inside that
+subtree—while preserving the allowed post being quoted and its reply text. It then
+emits the editor's normal input event so BGG adopts the sanitized draft. The
+extension never stores reply drafts.
+
 When subscription linking is enabled, the bridge reads BGG's current user-level
 subscription blocks and sends BGG a `PUT` only for hidden user IDs that are missing.
 It never removes a subscription block.
@@ -88,7 +96,8 @@ credential non-disclosure, pre-consent inactivity, affirmative onboarding,
 consent-triggered discussion-tab refresh, path-limited manifest scope, in-page
 discussion-route injection, default-on
 and opt-out subscription linking,
-page reveal behavior, lazy post and quotation assembly, and status storage.
+page reveal behavior, lazy post and quotation assembly, quote-composer
+sanitization, and status storage.
 
 An optional networked smoke test loads the unpacked extension into a disposable Chromium profile, seeds a temporary test username, and verifies post and quote removal against a live BGG thread. If BGG gives headless Chromium a Cloudflare challenge, the test keeps the real extension loaded on the BGG origin and substitutes the live markup shape captured during development:
 
@@ -106,12 +115,14 @@ The release ZIP is written to `artifacts/` and excludes tests and development fi
 
 ## Current BGG assumptions
 
-The implementation was checked against BGG's live Angular discussion markup on August 5, 2026:
+The implementation was checked against BGG's live Angular discussion markup on August 6, 2026:
 
 - posts are wrapped in `gg-post` with an `article.post`
 - native blocked posts render `Blocked User`, `Show Anyway`, and an
   `ngbtooltip` marker describing blocked content
 - quotations use `gg-markup-quote` and `.user-attribution`
+- the **Quote** button inserts nested `[q="username"]...[/q]` markup into
+  `textarea.post-textarea[name="text"]`
 - forum threads, GeekLists, images, videos, files, and blog-post comments use the
   shared `gg-comments`/`gg-post` component family
 - the authenticated block-list endpoint returns numeric user IDs

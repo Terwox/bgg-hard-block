@@ -26,6 +26,7 @@ BGG Hard Block removes:
 - native “Blocked User / Show Anyway” placeholders
 - complete discussion posts or comments written by anyone on your BGG Hidden Users list
 - quotations attributed to hidden users, while preserving the surrounding reply
+- blocked quotation subtrees from the reply draft BGG creates when you click Quote
 
 By default, it also adds Hidden Users to BGG's separate user-level subscription
 blocks. You can turn that linking off in Options. The extension never removes a
@@ -70,7 +71,8 @@ synced to the developer or a third party.
 
 Required to read BGG's Hidden Users list through BGG's own HTTPS API, identify
 authors in rendered discussion markup, remove matching posts/placeholders/quotations,
-and optionally add missing user-level subscription blocks to the signed-in BGG
+sanitize the reply draft BGG creates after a Quote click, and optionally add missing
+user-level subscription blocks to the signed-in BGG
 account. Filtering and BGG-data code is injected only on canonical HTTPS forum threads, GeekLists,
 images, videos, files, and individual blog posts. It does not run on unrelated BGG
 pages or any other site. Chrome ignores URL paths for host permissions, so the
@@ -84,7 +86,8 @@ The extension handles these categories solely for its disclosed single purpose:
 
 - personally identifiable information: BGG user identifiers and public usernames
 - authentication information: the current BGG authorization value, transiently in page memory
-- website content: rendered BGG discussion posts, comments, and author attributions
+- website content: rendered BGG discussion posts, comments, author attributions,
+  and BGG-generated reply-draft text; drafts are processed locally and never retained
 - web browsing activity: the current supported BGG discussion address, stored only for local status reporting
 
 The extension does not collect financial, health, location, personal communication,

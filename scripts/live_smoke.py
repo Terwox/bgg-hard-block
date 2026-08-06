@@ -97,8 +97,8 @@ async def seed_cached_block_list(websocket_url: str) -> None:
           chrome.storage.local.set({{
             bggHardBlockerConsent: {{
               granted: true,
-              disclosureVersion: '2026-08-05',
-              grantedAt: '2026-08-05T00:00:00.000Z'
+              disclosureVersion: '2026-08-06',
+              grantedAt: '2026-08-06T00:00:00.000Z'
             }},
             bggHardBlockerOptions: {{
               linkSubscriptionBlocks: true

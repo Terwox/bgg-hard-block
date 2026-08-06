@@ -14,7 +14,7 @@ let storedConsent;
 globalThis.chrome = {
   runtime: {
     getManifest() {
-      return { version: "0.3.4" };
+      return { version: "0.3.6" };
     },
     getURL(relativePath) {
       return `chrome-extension://test/${relativePath}`;
@@ -69,7 +69,7 @@ require(path.join(__dirname, "..", "src", "background.js"));
 
 const currentConsent = {
   granted: true,
-  disclosureVersion: "2026-08-05"
+  disclosureVersion: "2026-08-06"
 };
 
 async function settle() {
