@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Terwox
+#
+# Part of BGG Hard Block. See the LICENSE file at the repository root.
 """Capture a local HTML or SVG page at an exact Chrome Web Store asset size."""
 
 from __future__ import annotations
