@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Runs the same checks a contributor runs locally via ./scripts/test.sh, plus a
+# reproducibility check that builds the package twice and asserts the two ZIPs
+# are byte-identical. That second job is what keeps the verification procedure in
+# BUILD.md honest.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Extension checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ubuntu-latest ships Chrome preinstalled at this path; scripts/test.sh
+      # also probes for it, but setting CHROME_BIN makes the failure mode obvious
+      # if the runner image ever changes.
+      - name: Run extension checks
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: ./scripts/test.sh
+
+  reproducible:
+    name: Reproducible package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build twice and compare
+        run: |
+          set -euo pipefail
+          first="$(./scripts/package.sh)"
+          hash_one="$(sha256sum "$first" | cut -d' ' -f1)"
+          rm -f "$first"
+
+          second="$(./scripts/package.sh)"
+          hash_two="$(sha256sum "$second" | cut -d' ' -f1)"
+
+          echo "build 1: $hash_one"
+          echo "build 2: $hash_two"
+
+          if [ "$hash_one" != "$hash_two" ]; then
+            echo "::error::Package build is not reproducible; BUILD.md verification is broken." >&2
+            exit 1
+          fi
+          echo "Package build is reproducible: $hash_two"
