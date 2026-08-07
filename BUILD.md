@@ -1,0 +1,124 @@
+# Building and verifying BGG Hard Block
+
+There is no official reproducible-build or source-verification programme for the
+Chrome Web Store. Google reviews submissions, but it does not publish a mapping
+from a published extension back to a public repository, and it gives users no
+built-in way to check one. (Mozilla's add-on store does require source
+submission when code is minified or obfuscated; Chrome has no equivalent.)
+
+So "trust me, the source is on GitHub" is not, by itself, verifiable. This
+document describes what the project does instead.
+
+## The short version
+
+**There is no build step.** The files in `src/` are the files that run in your
+browser — no bundler, no minifier, no transpiler, no source maps to reconcile.
+Packaging is a copy and a ZIP. That means you can compare the extension Chrome
+actually installed against this repository directly, without trusting any
+toolchain in between.
+
+## 1. Build the package
+
+```bash
+./scripts/package.sh
+```
+
+This writes `artifacts/bgg-hard-block-<version>.zip` and prints its path. The
+script stages exactly:
+
+```
+manifest.json
+src/
+icons/
+README.md
+PRIVACY.md
+LICENSE
+```
+
+Nothing else ships. Tests, build scripts, and store screenshots stay out of the
+package.
+
+## 2. Confirm the build is reproducible
+
+The ZIP is deterministic: two builds of the same commit produce byte-identical
+archives, on any machine, regardless of when you clone or what your umask is.
+`scripts/make_zip.py` pins entry timestamps, permission bits, creator system,
+and entry order for exactly this reason.
+
+Check it yourself:
+
+```bash
+./scripts/package.sh
+sha256sum artifacts/bgg-hard-block-*.zip
+rm artifacts/bgg-hard-block-*.zip
+./scripts/package.sh
+sha256sum artifacts/bgg-hard-block-*.zip
+```
+
+Both hashes must match. If they don't, that's a bug — please report it, because
+it breaks everything below.
+
+Each tagged release records its expected SHA-256 in the release notes.
+
+## 3. Compare against what Chrome installed
+
+This is the step that actually verifies the published extension, and it does not
+require trusting the author at all.
+
+Chrome unpacks every installed extension to disk in readable form. Find it:
+
+| OS | Path |
+| --- | --- |
+| Linux | `~/.config/google-chrome/Default/Extensions/hkbnpeohgacliadddhjoddiickjnlnfl/` |
+| macOS | `~/Library/Application Support/Google/Chrome/Default/Extensions/hkbnpeohgacliadddhjoddiickjnlnfl/` |
+| Windows | `%LOCALAPPDATA%\Google\Chrome\User Data\Default\Extensions\hkbnpeohgacliadddhjoddiickjnlnfl\` |
+
+Inside is one directory per installed version. Diff its `src/` against this
+repository at the matching tag:
+
+```bash
+git checkout v0.3.7
+diff -ru src "<extensions-path>/0.3.7_0/src"
+diff -u manifest.json "<extensions-path>/0.3.7_0/manifest.json"
+```
+
+Expected differences, all added by Chrome rather than by the author:
+
+- a `key` field in `manifest.json` — Chrome inserts the extension's public key
+- a `_metadata/` directory containing `computed_hashes.json` and `verified_contents.json`
+- `differential_fingerprint`
+- on some builds, a `_locales/` directory
+
+Everything under `src/` should be identical. If a line of JavaScript differs
+from this repository, that is worth reporting loudly.
+
+## 4. Read the code
+
+The point of the previous three steps is to establish that the code in this
+repository is the code you are running. Once you accept that, the privacy
+claims become checkable by reading, and the places worth reading are short:
+
+| Question | Where to look |
+| --- | --- |
+| Does it phone home? | `src/page-bridge.js` — every network call goes through `fetchApi`, and `API_ROOT` is the only base URL in the file |
+| What happens to my auth header? | `src/page-bridge.js`, `captureAuthorization` — `authHeader` is a module-local variable, never passed to `publish()` |
+| What gets stored? | `src/content.js`, `writeStatus` — the complete set of persisted keys |
+| Does it act before I consent? | `src/content.js` lines near the top, and `src/settings-bridge.js`, `hasCurrentConsent` |
+| Where can it run at all? | `manifest.json`, `content_scripts[].matches`, and `isDiscussionUrl` in `src/background.js` |
+
+## Releasing (maintainer)
+
+1. Bump `version` in `manifest.json`.
+2. Update the disclosure-version ladder in `src/background.js`, `src/content.js`,
+   `src/settings-bridge.js`, `src/popup.js`, `src/options.js`, and
+   `src/onboarding.js` **only if the privacy disclosure text itself changed**.
+   Bumping it forces every existing user back through the consent screen, so
+   don't do it for ordinary fixes.
+3. `./scripts/test.sh`
+4. `./scripts/package.sh`
+5. Tag `vX.Y.Z`, push the tag, and attach the ZIP plus its SHA-256 to the
+   GitHub release.
+6. Upload the same ZIP to the Chrome Web Store.
+
+Uploading a package that differs from the tagged artifact defeats the whole
+mechanism above. Build once, ship that file to both places.
