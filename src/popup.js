@@ -1,13 +1,33 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Terwox
+//
+// This file is part of BGG Hard Block. See the LICENSE file at the repository
+// root for the full license text.
+
+/**
+ * Toolbar popup: a read-only status readout.
+ *
+ * Everything shown here is read from `chrome.storage.local`, which the content
+ * script wrote on the last discussion page. The popup issues no network
+ * requests, sends no messages to content scripts, and changes no state — the
+ * only interactive element opens the options or onboarding page.
+ *
+ * All values are written with `textContent`, never `innerHTML`, so a username
+ * from BGG cannot inject markup into extension UI.
+ */
 (async function renderPopup() {
   "use strict";
 
   const CONSENT_KEY = "bggHardBlockerConsent";
+
+  // Disclosure-version ladder — see the longer explanation in src/content.js.
   const LOADED_EXTENSION_VERSION = chrome.runtime?.getManifest?.().version || "";
   const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
     ? "2026-08-04"
     : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION)
       ? "2026-08-05"
       : "2026-08-06";
+
   const STORAGE_KEY = "bggHardBlockerState";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
@@ -32,9 +52,12 @@
   const consent = stored?.[CONSENT_KEY];
   const consentGranted =
     consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
+  // Default-on, matching settings-bridge.js and options.js.
   const linkingEnabled = stored?.[OPTIONS_KEY]?.linkSubscriptionBlocks !== false;
   const subscription = stored?.[SUBSCRIPTION_STATE_KEY];
 
+  // Sends the user wherever is actually useful: options once set up, the
+  // disclosure if they have not agreed yet.
   elements.options.addEventListener("click", () => {
     if (consentGranted) {
       chrome.runtime.openOptionsPage();
@@ -43,6 +66,9 @@
     }
   });
 
+  // Pre-consent: report inactivity plainly and stop. Counts are deliberately
+  // left blank rather than shown as zero, which would imply the extension had
+  // looked at a page and found nothing.
   if (!consentGranted) {
     elements.state.textContent = "Setup required";
     elements.subscription.textContent = "Off";
@@ -51,7 +77,10 @@
     return;
   }
 
+  // Subscription-linking summary. States originate in
+  // reconcileSubscriptionBlocks in src/page-bridge.js.
   if (!linkingEnabled) {
+    // Restates the one-way rule: switching off does not undo past linking.
     elements.subscription.textContent = "Off";
     elements.subscriptionNote.textContent = "Existing BGG subscription blocks are unchanged.";
   } else if (subscription?.state === "synced") {
@@ -70,6 +99,7 @@
     elements.subscriptionNote.textContent = "Linking hidden users to subscription blocks…";
   }
 
+  // No status yet means no discussion page has been visited since install.
   if (!status) {
     return;
   }
@@ -78,6 +108,9 @@
   elements.posts.textContent = String(status.hiddenPosts ?? 0);
   elements.quotes.textContent = String(status.hiddenQuotes ?? 0);
 
+  // Provenance of the block list used on the last page. Surfacing this matters:
+  // "cache" and "timeout" mean the filter ran against a list that may be stale,
+  // which the user should be able to see rather than having to infer.
   const labels = {
     cache: "Using the cached BGG block list",
     live: "Synced with the BGG block list",

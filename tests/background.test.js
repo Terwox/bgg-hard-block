@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Terwox
+//
+// This file is part of BGG Hard Block. See the LICENSE file at the repository
+// root for the full license text.
+
 "use strict";
 
 const assert = require("node:assert/strict");

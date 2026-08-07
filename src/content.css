@@ -1,11 +1,66 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 Terwox
+ *
+ * This file is part of BGG Hard Block. See the LICENSE file at the repository
+ * root for the full license text.
+ *
+ * Anti-flash CSS. Injected at document_start, before BGG renders anything.
+ *
+ * The problem: JavaScript cannot remove a blocked post until that post exists in
+ * the DOM, and by then the browser may already have painted it. Even a few
+ * frames of a post the user asked never to see defeats the purpose of the
+ * extension. So the page starts hidden and content.js un-hides it after the
+ * first filtering pass.
+ *
+ * The risk that creates: if the script fails, BGG stays blank forever. The
+ * failsafe below is what makes hiding the page an acceptable trade.
+ */
+
+/*
+ * 1. Hide until content.js signals it has filtered.
+ *
+ * `visibility: hidden` rather than `display: none` on purpose — the layout is
+ * still computed, so images and fonts load normally and revealing the page does
+ * not cause a reflow or a visible jump.
+ */
 html:not([data-bgg-hard-blocker-ready]) body {
   visibility: hidden !important;
 }
 
+/*
+ * 2. Failsafe: reveal after 2 seconds if the content script never attached.
+ *
+ * The selector requires *both* that the ready flag is absent (still hidden) and
+ * that the running flag is absent (content.js never started). If the script is
+ * running, this rule does not apply and the script's own reveal logic — which
+ * has its own shorter deadline — is in charge.
+ *
+ * Implemented as a zero-duration animation with a 2s delay and `forwards`,
+ * because CSS has no other way to change a property after a delay without
+ * JavaScript. That is exactly the point: this must work when JavaScript is
+ * broken, disabled, or blocked from injecting.
+ *
+ * Consequence worth being honest about: in that failure mode the user briefly
+ * sees an unfiltered page. A permanently blank BoardGameGeek is judged worse.
+ */
 html:not([data-bgg-hard-blocker-ready]):not([data-bgg-hard-blocker-running]) body {
   animation: bgg-hard-blocker-failsafe 0s linear 2s forwards;
 }
 
+/*
+ * 3. Suppress BGG's native "Blocked User" placeholder immediately.
+ *
+ * Purely declarative, so it applies the instant a placeholder is parsed —
+ * ahead of the MutationObserver, and without waiting for a block list to sync.
+ * content.js still removes these elements properly; this rule only stops them
+ * being painted in the gap.
+ *
+ * Gated on the running flag so that a stylesheet left behind after the script
+ * failed cannot hide content on its own.
+ *
+ * Uses `:has()`, which is why manifest.json sets minimum_chrome_version 111.
+ */
 html[data-bgg-hard-blocker-running]
   gg-post:has(> article.post > .post-body > [ngbtooltip*="blocked content" i]) {
   display: none !important;
