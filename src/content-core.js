@@ -46,6 +46,9 @@
   // and server-rendered posts do not always arrive with the same outer wrapper.
   const POST_SELECTOR = "gg-post, article.post";
   const QUOTE_SELECTOR = "gg-markup-quote";
+  const THREAD_PROFILE_LINK_SELECTOR =
+    'gg-thread-listing a[href*="/profile/"]';
+  const REDACTED_PROFILE_ATTRIBUTE = "data-bgg-hard-blocker-redacted";
 
   // Matches one BBCode quote token: [q], [q=name], [q="name"], [q='name'], [/q].
   // Groups 2/3/4 are the double-quoted, single-quoted, and bare username forms.
@@ -152,6 +155,13 @@
     return usernameFromProfileHref(microdataUrl?.getAttribute("content"));
   }
 
+  /** Find a descendant owned by this quote rather than by a nested quote. */
+  function ownedQuoteDescendant(quote, selector) {
+    return Array.from(quote.querySelectorAll(selector)).find(
+      (element) => element.closest(QUOTE_SELECTOR) === quote
+    );
+  }
+
   /**
    * Determine who a quotation is attributed to.
    *
@@ -178,17 +188,26 @@
       return normalizeUsername(explicit);
     }
 
+    // Stay inside this quote's own header. An anonymous `[q]...[/q]` can contain
+    // an attributed nested quote; an unrestricted descendant query would steal
+    // the nested username and misclassify the outer quotation.
+    const header = ownedQuoteDescendant(quote, ".c-header");
     const attribution =
-      quote.querySelector(".c-header .user-attribution") ||
-      quote.querySelector(".c-header gg-user-attribution") ||
-      quote.querySelector(".c-header");
+      header?.querySelector(".user-attribution") ||
+      header?.querySelector("gg-user-attribution") ||
+      header;
 
     if (!attribution) {
       return "";
     }
 
     const rawAttribution = attribution.textContent || attribution.innerText || "";
-    const trailingHandle = rawAttribution.match(/@([^@\r\n]+?)\s*$/);
+    // Current BGG markup commonly renders `@handle wrote:`. Strip the suffix
+    // while capturing the handle; otherwise the old line-based fallback would
+    // incorrectly treat `handle wrote:` as the username.
+    const trailingHandle = rawAttribution.match(
+      /@([^@\r\n]+?)(?:\s+wrote:)?\s*$/i
+    );
     if (trailingHandle) {
       return normalizeUsername(trailingHandle[1]);
     }
@@ -201,11 +220,42 @@
     const handleLine = [...lines].reverse().find((line) => line.startsWith("@"));
 
     if (handleLine) {
-      return normalizeUsername(handleLine);
+      return normalizeUsername(handleLine.replace(/\s+wrote:\s*$/i, ""));
     }
 
     const wroteMatch = lines.join(" ").match(/^(.+?)\s+wrote:\s*$/i);
     return wroteMatch ? normalizeUsername(wroteMatch[1]) : "";
+  }
+
+  /**
+   * Decide whether a quote with no author is complete enough to be intentional.
+   *
+   * BGG supports anonymous `[q]...[/q]` blocks. Depending on the renderer pass,
+   * they have either no owned `.c-header`, an empty header shell, or BGG's
+   * explicit `.c-no-author` marker (normally rendered as `Quote:`). Keeping any
+   * of those intentional forms in the anti-paint quarantine forever creates a
+   * large empty gap. A newly mounted attributed quote, by contrast, has
+   * meaningful header text without `.c-no-author`, so it remains quarantined
+   * until a later mutation makes it inspectable.
+   */
+  function isReadyAnonymousQuote(quote) {
+    if (!quote || quote.nodeType !== 1 || quoteUsername(quote)) {
+      return false;
+    }
+
+    const header = ownedQuoteDescendant(quote, ".c-header");
+    const headerText = (header?.textContent || header?.innerText || "").trim();
+    const explicitNoAuthor = Boolean(header?.querySelector(".c-no-author"));
+    if (headerText && !explicitNoAuthor) {
+      return false;
+    }
+
+    const content = ownedQuoteDescendant(quote, "gg-markup-content");
+    return Boolean(
+      content &&
+        ((content.textContent || content.innerText || "").trim() ||
+          content.children.length)
+    );
   }
 
   /**
@@ -302,6 +352,48 @@
   }
 
   /**
+   * Replace blocked usernames in BGG thread listings without removing threads.
+   *
+   * Forum indexes expose both the thread author and latest-reply author as
+   * profile links, sometimes duplicated for responsive layouts. Removing the
+   * whole listing would hide allowed conversations merely because a blocked
+   * user participated. Instead, keep the row and replace each matching name
+   * with a fresh `Blocked` label. Replacing BGG's whole avatar-popup trigger is
+   * deliberate: emptying the original link is not enough because Angular's
+   * bound hover handler can still open the user's profile card after the
+   * identifying attributes are gone.
+   */
+  function redactBlockedProfileNames(root, blockedUsernames) {
+    const blocked = makeBlockedSet(blockedUsernames);
+    let redacted = 0;
+
+    for (const link of collectElements(root, THREAD_PROFILE_LINK_SELECTOR)) {
+      if (
+        !link.isConnected ||
+        link.hasAttribute(REDACTED_PROFILE_ATTRIBUTE)
+      ) {
+        continue;
+      }
+
+      const username = usernameFromProfileHref(link.getAttribute("href"));
+      if (!username || !blocked.has(username)) {
+        continue;
+      }
+
+      const label = link.ownerDocument.createElement("span");
+      label.textContent = "Blocked";
+      label.className = "bgg-hard-blocker-redacted-name";
+      label.setAttribute(REDACTED_PROFILE_ATTRIBUTE, "");
+
+      const popupTrigger = link.closest("gg-avatar-popup-trigger");
+      (popupTrigger || link).replaceWith(label);
+      redacted += 1;
+    }
+
+    return redacted;
+  }
+
+  /**
    * Strip blocked users' quotations out of a reply draft.
    *
    * When BGG's **Quote** button is clicked, it inserts the quoted post as nested
@@ -394,11 +486,12 @@
    *
    * @param {Node} root Document or subtree to filter.
    * @param {Iterable<string>|Set<string>} blockedUsernames
-   * @returns {{posts: number, quotes: number}} How many nodes were removed.
+   * @returns {{posts: number, quotes: number, profileNames: number}} How many
+   *   posts/quotes were removed and forum-list names were redacted.
    */
   function filterDom(root, blockedUsernames) {
     const blocked = makeBlockedSet(blockedUsernames);
-    const result = { posts: 0, quotes: 0 };
+    const result = { posts: 0, quotes: 0, profileNames: 0 };
 
     for (const post of collectPosts(root)) {
       // A previous iteration may have removed an ancestor of this node.
@@ -419,12 +512,16 @@
       }
 
       const author = quoteUsername(quote);
-      // Unattributable quotes (author === "") are deliberately left in place.
+      // Unattributable quotes (author === "") are deliberately left in the
+      // DOM. The runtime may keep a newly inserted one visually quarantined
+      // until later hydration provides an attribution.
       if (author && blocked.has(author)) {
         quote.remove();
         result.quotes += 1;
       }
     }
+
+    result.profileNames = redactBlockedProfileNames(root, blocked);
 
     return result;
   }
@@ -433,11 +530,13 @@
   // that the rest of the extension trusts.
   return Object.freeze({
     filterDom,
+    isReadyAnonymousQuote,
     isNativeBlockedPlaceholder,
     makeBlockedSet,
     normalizeUsername,
     postUsername,
     quoteUsername,
+    redactBlockedProfileNames,
     sanitizeBlockedQuotes,
     usernameFromProfileHref
   });

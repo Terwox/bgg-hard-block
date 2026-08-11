@@ -39,12 +39,15 @@ const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
   ? "2026-08-04"
   : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION)
     ? "2026-08-05"
-    : "2026-08-06";
+    : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION)
+      ? "2026-08-06"
+      : "2026-08-10";
 
 // Match-pattern form, for chrome.tabs.query. Kept deliberately identical to the
 // `content_scripts[].matches` list in manifest.json — if you add a surface to
 // one, add it to the other and to DISCUSSION_PATH_PATTERNS below.
 const DISCUSSION_TAB_PATTERNS = [
+  "https://boardgamegeek.com/forum/*",
   "https://boardgamegeek.com/thread/*",
   "https://boardgamegeek.com/geeklist/*",
   "https://boardgamegeek.com/image/*",
@@ -55,6 +58,7 @@ const DISCUSSION_TAB_PATTERNS = [
 
 // Regex form of the same list, for validating a single URL.
 const DISCUSSION_PATH_PATTERNS = [
+  /^\/forum\//,
   /^\/thread\//,
   /^\/geeklist\//,
   /^\/image\//,

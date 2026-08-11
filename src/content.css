@@ -49,7 +49,61 @@ html:not([data-bgg-hard-blocker-ready]):not([data-bgg-hard-blocker-running]) bod
 }
 
 /*
- * 3. Suppress BGG's native "Blocked User" placeholder immediately.
+ * 3. Quarantine dynamically inserted author-bearing content until inspected.
+ *
+ * The whole-page hold ends after the initial pass, but BGG can add or hydrate
+ * discussion content much later. New posts, quotations, and forum-list profile
+ * links therefore start invisible and content.js marks only known-allowed
+ * items as checked. Because
+ * this selector depends on the *absence* of that marker, it applies as soon as
+ * the DOM node exists, before the MutationObserver callback and browser paint.
+ *
+ * Posts use `visibility` to preserve the surrounding thread layout during the
+ * usual one-microtask wait. Quotes use `display: none` so an unattributed quote
+ * cannot leave a large invisible rectangle while BGG finishes hydrating it.
+ * Releasing a safe quote can therefore cause a small reflow; that is preferable
+ * to either painted blocked content or a persistent quote-sized gap.
+ */
+html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
+  :is(gg-post, article.post):not([data-bgg-hard-blocker-checked]) {
+  visibility: hidden !important;
+}
+
+html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
+  gg-markup-quote:not([data-bgg-hard-blocker-checked]) {
+  display: none !important;
+}
+
+html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
+  gg-thread-listing
+  a[href*="/profile/"]:not([data-bgg-hard-blocker-checked]) {
+  visibility: hidden !important;
+}
+
+/*
+ * A redacted forum-list name is plain text, not BGG's original profile-link or
+ * avatar-popup component. Keeping it out of pointer hit-testing is a second
+ * guard against delegated hover behavior reintroducing a user card later.
+ */
+.bgg-hard-blocker-redacted-name {
+  cursor: default;
+  pointer-events: none;
+}
+
+/*
+ * BGG's own `.c-no-author` marker is already a complete, semantic decision:
+ * the quotation intentionally has no attributable user. Release that one safe
+ * form in CSS instead of waiting for the MutationObserver to add the checked
+ * attribute. The direct-child path is deliberate; a marker owned by a nested
+ * quote must not release an unresolved outer quote.
+ */
+html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
+  gg-markup-quote:has(> div > .c-header .c-no-author) {
+  display: block !important;
+}
+
+/*
+ * 4. Suppress BGG's native "Blocked User" placeholder immediately.
  *
  * Purely declarative, so it applies the instant a placeholder is parsed —
  * ahead of the MutationObserver, and without waiting for a block list to sync.

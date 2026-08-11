@@ -99,14 +99,6 @@ async def seed_cached_block_list(websocket_url: str) -> None:
 
         expression = f"""
           chrome.storage.local.set({{
-            bggHardBlockerConsent: {{
-              granted: true,
-              disclosureVersion: '2026-08-06',
-              grantedAt: '2026-08-06T00:00:00.000Z'
-            }},
-            bggHardBlockerOptions: {{
-              linkSubscriptionBlocks: true
-            }},
             bggHardBlockerState: {{
               usernames: [{json.dumps(TEST_USERNAME)}],
               status: {{ lastSync: '2026-08-04T00:00:00.000Z' }}
@@ -116,6 +108,48 @@ async def seed_cached_block_list(websocket_url: str) -> None:
         _, result = await evaluate(websocket, counter, expression)
         if result is not True:
             raise RuntimeError("Could not seed the extension block-list cache")
+
+
+async def grant_consent(websocket_url: str) -> None:
+    """Use the real onboarding UI so the smoke follows the current disclosure."""
+    async with websockets.connect(websocket_url, max_size=2_000_000) as websocket:
+        counter = 0
+        deadline = asyncio.get_running_loop().time() + 5
+        ready = False
+        while asyncio.get_running_loop().time() < deadline:
+            counter, ready = await evaluate(
+                websocket,
+                counter,
+                "Boolean(document.getElementById('agree') && globalThis.chrome?.storage?.local)",
+            )
+            if ready:
+                break
+            await asyncio.sleep(0.05)
+
+        if not ready:
+            raise RuntimeError("Onboarding consent control did not become available")
+
+        counter, clicked = await evaluate(
+            websocket,
+            counter,
+            "document.getElementById('agree').click(); true",
+        )
+        if clicked is not True:
+            raise RuntimeError("Could not activate onboarding consent")
+
+        deadline = asyncio.get_running_loop().time() + 5
+        while asyncio.get_running_loop().time() < deadline:
+            counter, consent = await evaluate(
+                websocket,
+                counter,
+                "chrome.storage.local.get('bggHardBlockerConsent')"
+                ".then((x) => x.bggHardBlockerConsent || {})",
+            )
+            if consent.get("granted") is True:
+                return
+            await asyncio.sleep(0.05)
+
+    raise RuntimeError("Onboarding did not persist consent")
 
 
 async def find_extension_id(port: int) -> str:
@@ -343,11 +377,12 @@ def main() -> int:
             port = debug_port(profile_dir, process)
             identifier = asyncio.run(find_extension_id(port))
             extension_ws = open_target(
-                port, f"chrome-extension://{identifier}/src/popup.html"
+                port, f"chrome-extension://{identifier}/src/onboarding.html"
             )
             thread_ws = open_target(port, THREAD_URL)
             previous_time_origin = asyncio.run(read_page_time_origin(thread_ws))
             asyncio.run(seed_cached_block_list(extension_ws))
+            asyncio.run(grant_consent(extension_ws))
             page = asyncio.run(
                 wait_for_filtered_thread(thread_ws, previous_time_origin)
             )

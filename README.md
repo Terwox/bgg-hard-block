@@ -19,6 +19,8 @@ This extension removes:
 - complete posts or comments authored by anyone on your BGG Hidden Users list
 - quotations attributed to blocked users, while preserving the surrounding reply
 - blocked quotation subtrees from the reply draft BGG creates when you click **Quote**
+- blocked authors' names from forum indexes, replacing each with **Blocked** while
+  preserving the thread listing
 
 There is intentionally no "show anyway" override.
 
@@ -83,16 +85,16 @@ version.
 | Blocked user IDs and usernames | `chrome.storage.local` | no |
 | Profile ID→username cache | BGG-origin `localStorage`, 30-day TTL | no |
 | Consent record and options | `chrome.storage.local` | no |
-| Hidden post/quote counts | `chrome.storage.local` | no |
+| Hidden post/quote and redacted-name counts | `chrome.storage.local` | no |
 | Reply drafts | never stored; sanitized in place | no |
 
 Full disclosure text: [PRIVACY.md](PRIVACY.md).
 
 ## Where it runs
 
-Filtering and BGG-data code runs only on canonical HTTPS URLs for forum threads,
-GeekLists, images, videos, files, and individual blog posts. It does not inject
-on BGG's home page, game pages, collection, store, account pages, forum indexes,
+Filtering and BGG-data code runs only on canonical HTTPS URLs for forum indexes,
+forum threads, GeekLists, images, videos, files, and individual blog posts. It
+does not inject on BGG's home page, game pages, collection, store, account pages,
 or any other site.
 
 If BGG enters a supported discussion through an in-page route change, the
@@ -129,18 +131,31 @@ never sends it to the isolated content script or saves it.
 
 The isolated content script caches only the consent record, blocked usernames,
 the subscription-linking option, and status counts in `chrome.storage.local`. A
-`MutationObserver` applies the same filter to posts loaded dynamically. Profile
-ID-to-name mappings are cached for 30 days in BGG's own local storage to avoid
-repeating every public profile request on every page.
+`MutationObserver` applies the same filter to posts and thread listings loaded
+dynamically. On forum indexes, blocked thread-author and latest-reply profile
+links and their avatar-popup triggers become plain **Blocked** labels with no
+profile card on hover; thread titles, dates, statistics, and navigation remain
+intact. Profile ID-to-name mappings are cached for 30 days in
+BGG's own local storage to avoid repeating every public profile request on every
+page.
 
 The discussion page stays hidden until the first filtering pass completes, so
 blocked content does not flash onscreen. Live synchronization reveals it
 immediately; otherwise it is revealed no later than 500 ms after
-`DOMContentLoaded`. A semantic CSS guard suppresses BGG's native blocked
-placeholder immediately, while the mutation filter rechecks the owning post or
-quotation as its text, links, and attributes arrive. A two-second CSS failsafe
-prevents broken JavaScript or changed BGG markup from leaving the site
-permanently blank.
+`DOMContentLoaded`. After that initial reveal, each newly inserted post,
+quotation, and forum-list profile link remains invisible until its author is
+known and allowed; ordinarily the mutation filter releases safe content before
+the next frame. Progressively
+hydrated content stays quarantined until its identifying text, links, or
+attributes arrive. Quotes collapse rather than reserving an invisible rectangle
+while quarantined. Intentionally anonymous `[q]` quotations—including BGG's
+empty-header shell and explicit `Quote:` no-author forms—are released as soon as
+their body is populated. BGG's semantic no-author marker is released directly
+by CSS, without waiting for JavaScript, and current `@handle wrote:` attribution
+is parsed correctly. A debounced full-document
+pass backs up the targeted mutation checks, while a semantic CSS guard suppresses
+BGG's native blocked placeholder immediately. A two-second CSS failsafe prevents
+broken JavaScript or changed BGG markup from leaving the site permanently blank.
 
 After you click BGG's **Quote** button, the content script locally parses the
 nested `[q="username"]...[/q]` text BGG inserts into the reply editor. It removes
@@ -168,7 +183,9 @@ normalization, authenticated API bridging, credential non-disclosure,
 pre-consent inactivity, affirmative onboarding, consent-triggered discussion-tab
 refresh, path-limited manifest scope, in-page discussion-route injection,
 default-on and opt-out subscription linking, page reveal behavior, lazy post and
-quotation assembly, quote-composer sanitization, and status storage.
+quotation insertion after the initial reveal, forum-index name redaction,
+progressive hydration, per-item paint quarantine, full-sweep recovery,
+quote-composer sanitization, and status storage.
 
 An optional networked smoke test loads the unpacked extension into a disposable
 Chromium profile, seeds a temporary test username, and verifies post and quote
@@ -189,7 +206,7 @@ destinations are out of bounds.
 ## Current BGG assumptions
 
 The implementation was checked against BGG's live Angular discussion markup on
-August 6, 2026:
+August 10, 2026:
 
 - posts are wrapped in `gg-post` with an `article.post`
 - native blocked posts render `Blocked User`, `Show Anyway`, and an
@@ -197,6 +214,8 @@ August 6, 2026:
 - quotations use `gg-markup-quote` and `.user-attribution`
 - the **Quote** button inserts nested `[q="username"]...[/q]` markup into
   `textarea.post-textarea[name="text"]`
+- forum indexes render each row as `gg-thread-listing` and expose thread-author
+  and latest-reply names through `/profile/<username>` links
 - forum threads, GeekLists, images, videos, files, and blog-post comments use the
   shared `gg-comments`/`gg-post` component family
 - the authenticated block-list endpoint returns numeric user IDs

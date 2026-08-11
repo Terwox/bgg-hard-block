@@ -14,7 +14,7 @@
               return {
                 bggHardBlockerConsent: {
                   granted: true,
-                  disclosureVersion: "2026-08-06"
+                  disclosureVersion: "2026-08-10"
                 },
                 bggHardBlockerState: {
                   usernames: ["Muted User"],
@@ -59,6 +59,20 @@
         <button id="runtime-quote-button" type="button" class="post-btn"> Quote </button>
       </article>
     </gg-post>
+    <gg-thread-listing id="runtime-forum-row">
+      <span id="runtime-blocked-name-slot">
+        <gg-avatar-popup-trigger>
+          <div container="body" triggers="manual" autoclose="outside">
+            <a href="/profile/Muted%20User" target="_self">
+              <span>Muted User</span>
+            </a>
+          </div>
+        </gg-avatar-popup-trigger>
+      </span>
+      <a id="runtime-allowed-name" href="/profile/AllowedUser" target="_self">
+        <span>AllowedUser</span>
+      </a>
+    </gg-thread-listing>
     <div id="runtime-composer"></div>
     <script>
       const rawQuoteDraft = `[q="Allowed Reply"]
@@ -102,10 +116,28 @@ Allowed reply survives.
         check(!document.getElementById("runtime-placeholder"), "placeholder survived runtime filtering");
         check(!document.getElementById("runtime-blocked-quote"), "blocked quote survived runtime filtering");
         check(Boolean(document.getElementById("runtime-reply-text")), "reply text was removed");
+        const blockedName = document.querySelector(
+          "#runtime-blocked-name-slot [data-bgg-hard-blocker-redacted]"
+        );
+        check(blockedName?.textContent.trim() === "Blocked", "forum-list username was not redacted");
+        check(blockedName?.tagName === "SPAN", "forum-list username did not become plain text");
+        check(!blockedName?.hasAttribute("href"), "redacted username still links to the profile");
+        check(
+          !blockedName?.closest("gg-avatar-popup-trigger"),
+          "redacted username retained BGG's hover popup"
+        );
+        check(
+          document.getElementById("runtime-allowed-name")?.textContent.trim() === "AllowedUser",
+          "allowed forum-list username was changed"
+        );
         check(writes.length > 0, "runtime status was not written");
         const status = writes.at(-1)?.bggHardBlockerState?.status;
         check(status?.hiddenPosts === 1, `expected 1 hidden post, got ${status?.hiddenPosts}`);
         check(status?.hiddenQuotes === 1, `expected 1 hidden quote, got ${status?.hiddenQuotes}`);
+        check(
+          status?.redactedProfileNames === 1,
+          `expected 1 redacted name, got ${status?.redactedProfileNames}`
+        );
         const quoteEditor = document.getElementById("runtime-quote-editor");
         check(Boolean(quoteEditor), "BGG-style quote editor was not created");
         check(

@@ -62,7 +62,9 @@
     ? "2026-08-04"
     : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION)
       ? "2026-08-05"
-      : "2026-08-06";
+      : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION)
+        ? "2026-08-06"
+        : "2026-08-10";
 
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
@@ -71,7 +73,19 @@
   const READY_ATTRIBUTE = "data-bgg-hard-blocker-ready";
   /** Set on <html> purely so tests can assert the script attached. */
   const RUNNING_ATTRIBUTE = "data-bgg-hard-blocker-running";
-  const FILTERABLE_SELECTOR = "gg-post, article.post, gg-markup-quote";
+  /** Set on <html> once a usable block list makes per-item checks possible. */
+  const QUARANTINE_ATTRIBUTE = "data-bgg-hard-blocker-quarantine";
+  /** Set on author-bearing elements after their author has been inspected. */
+  const CHECKED_ATTRIBUTE = "data-bgg-hard-blocker-checked";
+  const POST_SELECTOR = "gg-post, article.post";
+  const QUOTE_SELECTOR = "gg-markup-quote";
+  const THREAD_PROFILE_LINK_SELECTOR =
+    'gg-thread-listing a[href*="/profile/"]';
+  const FILTERABLE_SELECTOR = [
+    POST_SELECTOR,
+    QUOTE_SELECTOR,
+    THREAD_PROFILE_LINK_SELECTOR
+  ].join(", ");
   const QUOTE_BUTTON_SELECTOR = "gg-post button.post-btn";
   const QUOTE_EDITOR_SELECTOR = "textarea.post-textarea[name=\"text\"]";
 
@@ -85,6 +99,10 @@
   // Long enough for a typical authenticated round trip, short enough that a
   // failed sync is not perceived as a broken site.
   const POST_LOAD_MAX_HOLD_MS = 500;
+  // Backstop for mutation shapes the targeted root collector does not capture.
+  // Local filtering still runs immediately; this coalesces a render burst into
+  // one whole-document verification pass.
+  const FULL_SWEEP_DEBOUNCE_MS = 75;
 
   if (!core || !document.documentElement) {
     return;
@@ -117,20 +135,95 @@
   let domReady = document.readyState !== "loading";
   let hiddenPosts = 0;
   let hiddenQuotes = 0;
+  let redactedProfileNames = 0;
   let revealDeadlineTimer = 0;
   let statusWriteTimer = 0;
+  let fullSweepTimer = 0;
   /** Provenance of the current list; surfaced verbatim in the popup. */
   let source = "waiting";
   let lastSync = null;
   let unresolved = 0;
+
+  /** Collect matching descendants, including an element root itself. */
+  function collectElements(root, selector) {
+    const elements = [];
+    if (root?.nodeType === Node.ELEMENT_NODE && root.matches(selector)) {
+      elements.push(root);
+    }
+    if (typeof root?.querySelectorAll === "function") {
+      elements.push(...root.querySelectorAll(selector));
+    }
+    return elements;
+  }
+
+  /** Resolve an article to the outer gg-post shell that must be released. */
+  function canonicalPost(element) {
+    return element.matches("gg-post")
+      ? element
+      : element.closest("gg-post") || element;
+  }
+
+  /**
+   * Release only content whose author is known and allowed.
+   *
+   * Newly inserted posts and quotes start hidden by CSS. If BGG has not yet
+   * hydrated enough markup to identify the author, the item stays quarantined
+   * instead of being mistaken for safe. The next relevant mutation rechecks it.
+   */
+  function releaseInspectedContent(root) {
+    if (!hasBlockList) {
+      return;
+    }
+
+    const posts = new Set(collectElements(root, POST_SELECTOR).map(canonicalPost));
+    for (const post of posts) {
+      if (!post.isConnected) {
+        continue;
+      }
+
+      const author = core.postUsername(post);
+      if (!author || blockedUsernames.has(author)) {
+        continue;
+      }
+
+      post.setAttribute(CHECKED_ATTRIBUTE, "");
+      const article = post.matches("article.post")
+        ? post
+        : post.querySelector(":scope > article.post");
+      article?.setAttribute(CHECKED_ATTRIBUTE, "");
+    }
+
+    for (const quote of collectElements(root, QUOTE_SELECTOR)) {
+      if (!quote.isConnected) {
+        continue;
+      }
+
+      const author = core.quoteUsername(quote);
+      if (
+        (author && !blockedUsernames.has(author)) ||
+        (!author && core.isReadyAnonymousQuote(quote))
+      ) {
+        quote.setAttribute(CHECKED_ATTRIBUTE, "");
+      }
+    }
+
+    for (const link of collectElements(root, THREAD_PROFILE_LINK_SELECTOR)) {
+      const author = core.usernameFromProfileHref(link.getAttribute("href"));
+      if (author && !blockedUsernames.has(author)) {
+        link.setAttribute(CHECKED_ATTRIBUTE, "");
+      }
+    }
+  }
 
   /** Run the core filter over a subtree and accumulate counts. */
   function filter(root = document) {
     const result = core.filterDom(root, blockedUsernames);
     hiddenPosts += result.posts;
     hiddenQuotes += result.quotes;
+    redactedProfileNames += result.profileNames;
+    releaseInspectedContent(root);
 
-    if (result.posts || result.quotes) {
+    if (result.posts || result.quotes || result.profileNames) {
       scheduleStatusWrite();
     }
   }
@@ -179,6 +272,7 @@
       blockedCount: blockedUsernames.size,
       hiddenPosts,
       hiddenQuotes,
+      redactedProfileNames,
       lastSync,
       pageUrl: location.href,
       source,
@@ -237,6 +331,9 @@
     lastSync = payload.syncedAt || lastSync;
     unresolved = Array.isArray(payload.unresolved) ? payload.unresolved.length : 0;
     filter(document);
+    // The filter above marks all currently inspectable allowed items before
+    // enabling CSS quarantine, so a late live sync cannot blank a visible page.
+    document.documentElement.setAttribute(QUARANTINE_ATTRIBUTE, "");
     revealIfReady();
     scheduleStatusWrite();
     return true;
@@ -376,6 +473,15 @@
     }
   }
 
+  /** Verify the full page once an Angular render burst settles. */
+  function scheduleFullSweep() {
+    window.clearTimeout(fullSweepTimer);
+    fullSweepTimer = window.setTimeout(() => {
+      fullSweepTimer = 0;
+      filter(document);
+    }, FULL_SWEEP_DEBOUNCE_MS);
+  }
+
   const observer = new MutationObserver((records) => {
     // Deduplicate first: one Angular render produces many records pointing at
     // the same post.
@@ -393,16 +499,26 @@
         filter(root);
       }
     }
+
+    scheduleFullSweep();
   });
 
-  // Attribute filtering is narrow on purpose. These four are the attributes
-  // that can change a filtering decision after a post is already in the DOM:
-  // `content` (microdata author), `data-username` (quote author), `href`
-  // (profile link hydration), and `ngbtooltip` (native blocked marker).
+  // Attribute filtering is narrow on purpose. These are the attributes that
+  // can change a filtering decision after a post is already in the DOM:
+  // `content`/`itemprop` (microdata author), `data-username` (quote author),
+  // `href` (profile link hydration), `ngbtooltip` (native blocked marker), and
+  // `class` (Angular turning a generic shell into filterable markup).
   // Watching all attributes would fire on every hover and animation frame.
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["content", "data-username", "href", "ngbtooltip"],
+    attributeFilter: [
+      "class",
+      "content",
+      "data-username",
+      "href",
+      "itemprop",
+      "ngbtooltip"
+    ],
     characterData: true,
     childList: true,
     subtree: true

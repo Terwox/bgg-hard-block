@@ -156,6 +156,7 @@ async function settle() {
 
   assert.equal(queries.length, 1);
   assert.deepEqual(queries[0].url, [
+    "https://boardgamegeek.com/forum/*",
     "https://boardgamegeek.com/thread/*",
     "https://boardgamegeek.com/geeklist/*",
     "https://boardgamegeek.com/image/*",

@@ -31,7 +31,9 @@
     ? "2026-08-04"
     : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION)
       ? "2026-08-05"
-      : "2026-08-06";
+      : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION)
+        ? "2026-08-06"
+        : "2026-08-10";
 
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const agree = document.getElementById("agree");
