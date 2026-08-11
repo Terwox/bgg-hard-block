@@ -21,6 +21,7 @@ from live_smoke import (
     debug_port,
     evaluate,
     find_extension_id,
+    grant_consent,
     open_target,
     seed_cached_block_list,
     stop_process_group,
@@ -186,9 +187,10 @@ def main() -> int:
             port = debug_port(profile_dir, process)
             identifier = asyncio.run(find_extension_id(port))
             extension_ws = open_target(
-                port, f"chrome-extension://{identifier}/src/popup.html"
+                port, f"chrome-extension://{identifier}/src/onboarding.html"
             )
             asyncio.run(seed_cached_block_list(extension_ws))
+            asyncio.run(grant_consent(extension_ws))
             page_ws = open_target(port, NON_DISCUSSION_URL)
             initial = asyncio.run(wait_for_document(page_ws))
             result = asyncio.run(enter_discussion_and_filter(page_ws))

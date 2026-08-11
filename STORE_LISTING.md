@@ -58,7 +58,7 @@ subscription blocks aligned with that same list.
 
 Attaches the same local filter after BoardGameGeek enters a supported discussion
 URL through an in-page route change instead of loading a new document. It is used
-only on the six disclosed discussion-page families and does not grant browsing-
+only on the seven disclosed discussion-page families and does not grant browsing-
 history access.
 
 ### `storage`
@@ -70,11 +70,12 @@ synced to the developer or a third party.
 ### BoardGameGeek page access
 
 Required to read BGG's Hidden Users list through BGG's own HTTPS API, identify
-authors in rendered discussion markup, remove matching posts/placeholders/quotations,
-sanitize the reply draft BGG creates after a Quote click, and optionally add missing
-user-level subscription blocks to the signed-in BGG
-account. Filtering and BGG-data code is injected only on canonical HTTPS forum threads, GeekLists,
-images, videos, files, and individual blog posts. It does not run on unrelated BGG
+authors in rendered discussion markup, redact matching names on forum indexes,
+remove matching posts/placeholders/quotations, sanitize the reply draft BGG
+creates after a Quote click, and optionally add missing user-level subscription
+blocks to the signed-in BGG account. Filtering and BGG-data code is injected only
+on canonical HTTPS forum indexes, forum threads, GeekLists, images, videos,
+files, and individual blog posts. It does not run on unrelated BGG
 pages or any other site. Chrome ignores URL paths for host permissions, so the
 single canonical BGG origin permission is also used to identify supported open
 discussion tabs for automatic refresh after consent or extension updates and to

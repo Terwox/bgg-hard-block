@@ -12,6 +12,7 @@ const path = require("node:path");
 const manifest = require(path.join(__dirname, "..", "manifest.json"));
 
 const discussionMatches = [
+  "https://boardgamegeek.com/forum/*",
   "https://boardgamegeek.com/thread/*",
   "https://boardgamegeek.com/geeklist/*",
   "https://boardgamegeek.com/image/*",
@@ -66,6 +67,7 @@ for (const url of unrelatedPages) {
 }
 
 for (const url of [
+  "https://boardgamegeek.com/forum/3325850/rsp-guild/general",
   "https://boardgamegeek.com/thread/3708408/article/48017278",
   "https://boardgamegeek.com/geeklist/379404/example",
   "https://boardgamegeek.com/image/701383/example",

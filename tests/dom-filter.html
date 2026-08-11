@@ -52,23 +52,96 @@
           <div class="post-body">
             <gg-markup-quote id="allowed-quote">
               <div class="c-header"><span class="user-attribution">Someone Else<br>@SomeoneElse</span></div>
-              <gg-markup-content>Allowed quotation</gg-markup-content>
+              <gg-markup-content>
+                Allowed quotation
+                <gg-markup-quote id="explicit-anonymous-quote">
+                  <div>
+                    <div class="c-header"><span class="c-no-author">Quote:</span></div>
+                    <gg-markup-content>
+                      Intentional nested anonymous quotation.
+                    </gg-markup-content>
+                  </div>
+                </gg-markup-quote>.
+              </gg-markup-content>
             </gg-markup-quote>
           </div>
         </article>
       </gg-post>
+
+      <gg-post id="current-attribution-markup">
+        <article class="post">
+          <header class="post-header"><a href="/profile/AllowedUser">AllowedUser</a></header>
+          <div class="post-body">
+            <gg-markup-quote id="blocked-wrote-quote">
+              <div class="c-header"><span class="user-attribution">@Muted User wrote:</span></div>
+              <gg-markup-content>Blocked current-markup quotation</gg-markup-content>
+            </gg-markup-quote>
+            <gg-markup-quote id="anonymous-outer-quote">
+              <div class="c-header"><span class="user-attribution"></span></div>
+              <gg-markup-content>
+                Anonymous abstract
+                <gg-markup-quote id="nested-attributed-quote">
+                  <div class="c-header"><span class="user-attribution">@SomeoneElse wrote:</span></div>
+                  <gg-markup-content>Nested allowed quotation</gg-markup-content>
+                </gg-markup-quote>
+              </gg-markup-content>
+            </gg-markup-quote>
+          </div>
+        </article>
+      </gg-post>
+
+      <gg-thread-listing id="forum-row">
+        <div class="forum-list__body">
+          <span id="blocked-thread-author-slot">
+            <gg-avatar-popup-trigger id="blocked-thread-author-popup">
+              <div container="body" triggers="manual" autoclose="outside">
+                <a
+                  class="link-text-color"
+                  href="/profile/Muted%20User"
+                  tabindex="0"
+                  target="_self"
+                  title="Muted User"
+                  aria-label="Muted User profile"
+                ><span>Muted User</span></a>
+              </div>
+            </gg-avatar-popup-trigger>
+          </span>
+          <a
+            id="allowed-thread-author"
+            class="link-text-color"
+            href="/profile/AllowedUser"
+            target="_self"
+          ><span>AllowedUser</span></a>
+          <span id="blocked-latest-author-slot">
+            <a
+              class="link-text-color"
+              href="https://boardgamegeek.com/profile/MUTED%20USER"
+              target="_self"
+            ><span>Muted User</span></a>
+          </span>
+        </div>
+      </gg-thread-listing>
     </main>
 
     <script src="../src/content-core.js"></script>
     <script>
       const failures = [];
+      let leakedHoverCount = 0;
+      const originalPopup = document.getElementById("blocked-thread-author-popup");
+      originalPopup.addEventListener("mouseover", () => {
+        leakedHoverCount += 1;
+      });
       const result = BggHardBlockerCore.filterDom(document, ["Muted User"]);
       const check = (condition, message) => {
         if (!condition) failures.push(message);
       };
 
       check(result.posts === 3, `expected 3 removed posts, got ${result.posts}`);
-      check(result.quotes === 1, `expected 1 removed quote, got ${result.quotes}`);
+      check(result.quotes === 2, `expected 2 removed quotes, got ${result.quotes}`);
+      check(
+        result.profileNames === 2,
+        `expected 2 redacted profile names, got ${result.profileNames}`
+      );
       check(!document.getElementById("blocked-direct-post"), "blocked author's post remains");
       check(!document.getElementById("native-placeholder"), "native placeholder remains");
       check(!document.getElementById("semantic-placeholder"), "semantic placeholder remains");
@@ -76,9 +149,71 @@
       check(Boolean(document.getElementById("allowed-with-blocked-quote")), "replying post was removed");
       check(Boolean(document.getElementById("allowed-reply")), "allowed reply was removed");
       check(Boolean(document.getElementById("allowed-quote")), "allowed quotation was removed");
+      const explicitAnonymousQuote = document.getElementById("explicit-anonymous-quote");
+      check(Boolean(explicitAnonymousQuote), "explicit anonymous quotation was removed");
+      check(
+        BggHardBlockerCore.quoteUsername(explicitAnonymousQuote) === "",
+        "explicit anonymous quotation was assigned an author"
+      );
+      check(
+        BggHardBlockerCore.isReadyAnonymousQuote(explicitAnonymousQuote),
+        "BGG's explicit no-author quotation was not recognized as ready"
+      );
+      check(!document.getElementById("blocked-wrote-quote"), "@handle wrote quote remains");
+      const anonymousQuote = document.getElementById("anonymous-outer-quote");
+      check(Boolean(anonymousQuote), "anonymous outer quotation was removed");
+      check(
+        BggHardBlockerCore.quoteUsername(anonymousQuote) === "",
+        "anonymous quote stole a nested quote's attribution"
+      );
+      check(
+        BggHardBlockerCore.isReadyAnonymousQuote(anonymousQuote),
+        "populated anonymous quote with BGG's empty header shell was not recognized as ready"
+      );
+      check(
+        BggHardBlockerCore.quoteUsername(
+          document.getElementById("nested-attributed-quote")
+        ) === "someoneelse",
+        "@handle wrote attribution was not normalized"
+      );
       check(
         BggHardBlockerCore.usernameFromProfileHref("/profile/Muted%20User") === "muted user",
         "encoded profile username was not normalized"
+      );
+      const redactedNames = [
+        document.querySelector(
+          "#blocked-thread-author-slot [data-bgg-hard-blocker-redacted]"
+        ),
+        document.querySelector(
+          "#blocked-latest-author-slot [data-bgg-hard-blocker-redacted]"
+        )
+      ];
+      for (const [index, redacted] of redactedNames.entries()) {
+        const id = index === 0 ? "blocked-thread-author" : "blocked-latest-author";
+        check(redacted?.textContent === "Blocked", `${id} did not become Blocked`);
+        check(redacted?.tagName === "SPAN", `${id} did not become plain text`);
+        check(!redacted?.hasAttribute("href"), `${id} still exposes a profile URL`);
+        check(!redacted?.hasAttribute("tabindex"), `${id} stayed keyboard-focusable`);
+        check(!redacted?.hasAttribute("target"), `${id} stayed interactive`);
+        check(!redacted?.hasAttribute("title"), `${id} retained the username title`);
+        check(!redacted?.hasAttribute("aria-label"), `${id} retained the username label`);
+        check(
+          !redacted?.closest("gg-avatar-popup-trigger"),
+          `${id} retained BGG's avatar-popup trigger`
+        );
+      }
+      redactedNames[0]?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      check(!originalPopup.isConnected, "blocked user's popup trigger remains connected");
+      check(leakedHoverCount === 0, "hovering Blocked still invoked the user popup");
+      const allowedThreadAuthor = document.getElementById("allowed-thread-author");
+      check(
+        allowedThreadAuthor?.textContent === "AllowedUser" &&
+          allowedThreadAuthor?.getAttribute("href") === "/profile/AllowedUser",
+        "allowed forum-list author was changed"
+      );
+      check(
+        BggHardBlockerCore.filterDom(document, ["Muted User"]).profileNames === 0,
+        "forum-list redaction was not idempotent"
       );
 
       const nestedDraft = `[q="Allowed Reply"]

@@ -26,13 +26,16 @@
     ? "2026-08-04"
     : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION)
       ? "2026-08-05"
-      : "2026-08-06";
+      : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION)
+        ? "2026-08-06"
+        : "2026-08-10";
 
   const STORAGE_KEY = "bggHardBlockerState";
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
   const elements = {
     blocked: document.getElementById("blocked-count"),
+    names: document.getElementById("name-count"),
     options: document.getElementById("open-options"),
     posts: document.getElementById("post-count"),
     quotes: document.getElementById("quote-count"),
@@ -107,6 +110,7 @@
   elements.blocked.textContent = String(status.blockedCount ?? 0);
   elements.posts.textContent = String(status.hiddenPosts ?? 0);
   elements.quotes.textContent = String(status.hiddenQuotes ?? 0);
+  elements.names.textContent = String(status.redactedProfileNames ?? 0);
 
   // Provenance of the block list used on the last page. Surfacing this matters:
   // "cache" and "timeout" mean the filter ran against a list that may be stale,

@@ -13,7 +13,7 @@
               return {
                 bggHardBlockerConsent: {
                   granted: true,
-                  disclosureVersion: "2026-08-06"
+                  disclosureVersion: "2026-08-10"
                 }
               };
             },
@@ -27,12 +27,15 @@
   </head>
   <body data-status="running">
     <div id="feed"></div>
+    <div id="sweep-trigger"></div>
     <script>
       const feed = document.getElementById("feed");
+      const checkedAttribute = "data-bgg-hard-blocker-checked";
+      const quarantineAttribute = "data-bgg-hard-blocker-quarantine";
+      const snapshots = {};
       const blockedPost = document.createElement("gg-post");
       blockedPost.id = "lazy-blocked-post";
       blockedPost.innerHTML = '<article class="post"><div class="post-body"></div></article>';
-      feed.append(blockedPost);
 
       const allowedPost = document.createElement("gg-post");
       allowedPost.id = "lazy-allowed-post";
@@ -40,6 +43,27 @@
         <article class="post">
           <header class="post-header"><a href="/profile/Allowed">Allowed</a></header>
           <div class="post-body">
+            <gg-markup-quote id="lazy-allowed-quote">
+              <div class="c-header"><span class="user-attribution">@Friendly User wrote:</span></div>
+              <gg-markup-content>
+                Allowed quotation
+                <gg-markup-quote id="lazy-explicit-anonymous-quote">
+                  <div>
+                    <div class="c-header"><span class="c-no-author">Quote:</span></div>
+                    <gg-markup-content>
+                      BGG-marked anonymous quotation
+                    </gg-markup-content>
+                  </div>
+                </gg-markup-quote>.
+                <gg-markup-quote id="lazy-anonymous-quote">
+                  <div class="c-header"><span class="user-attribution"></span></div>
+                  <gg-markup-content>
+                    <strong>Anonymous quoted abstract</strong>
+                    <p>This quote deliberately has no author.</p>
+                  </gg-markup-content>
+                </gg-markup-quote>
+              </gg-markup-content>
+            </gg-markup-quote>
             <gg-markup-quote id="lazy-blocked-quote">
               <div class="c-header"><span class="user-attribution">Loading attribution</span></div>
               <gg-markup-content>Blocked quotation</gg-markup-content>
@@ -47,7 +71,115 @@
             <p id="lazy-allowed-reply">Allowed reply</p>
           </div>
         </article>`;
-      feed.append(allowedPost);
+
+      const forumRow = document.createElement("gg-thread-listing");
+      forumRow.id = "lazy-forum-row";
+      forumRow.innerHTML = `
+        <span id="lazy-blocked-name-slot">
+          <gg-avatar-popup-trigger>
+            <div container="body" triggers="manual" autoclose="outside">
+              <a id="lazy-blocked-name" href="/profile/Muted%20User" target="_self">
+                <span>Muted User</span>
+              </a>
+            </div>
+          </gg-avatar-popup-trigger>
+        </span>
+        <a id="lazy-allowed-name" href="/profile/AllowedUser" target="_self">
+          <span>AllowedUser</span>
+        </a>`;
+
+      setTimeout(() => {
+        snapshots.pageReadyBeforeInsert = document.documentElement.hasAttribute(
+          "data-bgg-hard-blocker-ready"
+        );
+        snapshots.quarantineActive = document.documentElement.hasAttribute(
+          quarantineAttribute
+        );
+        feed.append(blockedPost, allowedPost, forumRow);
+
+        snapshots.blockedVisibilityAtInsert = getComputedStyle(blockedPost).visibility;
+        snapshots.quoteVisibilityAtInsert = getComputedStyle(
+          document.getElementById("lazy-blocked-quote")
+        ).visibility;
+        snapshots.anonymousQuoteDisplayAtInsert = getComputedStyle(
+          document.getElementById("lazy-anonymous-quote")
+        ).display;
+        snapshots.explicitAnonymousQuoteDisplayAtInsert = getComputedStyle(
+          document.getElementById("lazy-explicit-anonymous-quote")
+        ).display;
+        snapshots.blockedNameVisibilityAtInsert = getComputedStyle(
+          document.getElementById("lazy-blocked-name")
+        ).visibility;
+        snapshots.allowedNameVisibilityAtInsert = getComputedStyle(
+          document.getElementById("lazy-allowed-name")
+        ).visibility;
+
+        requestAnimationFrame(() => {
+          snapshots.allowedCheckedAfterFrame = allowedPost.hasAttribute(checkedAttribute);
+          snapshots.allowedVisibilityAfterFrame = getComputedStyle(allowedPost).visibility;
+          const allowedQuote = document.getElementById("lazy-allowed-quote");
+          snapshots.allowedQuoteCheckedAfterFrame = allowedQuote.hasAttribute(checkedAttribute);
+          snapshots.allowedQuoteVisibilityAfterFrame = getComputedStyle(allowedQuote).visibility;
+          const anonymousQuote = document.getElementById("lazy-anonymous-quote");
+          snapshots.anonymousQuoteCheckedAfterFrame = anonymousQuote.hasAttribute(
+            checkedAttribute
+          );
+          snapshots.anonymousQuoteVisibilityAfterFrame = getComputedStyle(
+            anonymousQuote
+          ).visibility;
+          snapshots.anonymousQuoteDisplayAfterFrame = getComputedStyle(
+            anonymousQuote
+          ).display;
+          const explicitAnonymousQuote = document.getElementById(
+            "lazy-explicit-anonymous-quote"
+          );
+          snapshots.explicitAnonymousQuoteCheckedAfterFrame =
+            explicitAnonymousQuote.hasAttribute(checkedAttribute);
+          snapshots.explicitAnonymousQuoteDisplayAfterFrame = getComputedStyle(
+            explicitAnonymousQuote
+          ).display;
+          snapshots.blockedStillPresentAfterFrame = blockedPost.isConnected;
+          snapshots.blockedVisibilityAfterFrame = getComputedStyle(blockedPost).visibility;
+          const quote = document.getElementById("lazy-blocked-quote");
+          snapshots.quoteStillPresentAfterFrame = Boolean(quote);
+          snapshots.quoteDisplayAfterFrame = quote
+            ? getComputedStyle(quote).display
+            : "removed";
+          const blockedName = document.querySelector(
+            "#lazy-blocked-name-slot [data-bgg-hard-blocker-redacted]"
+          );
+          snapshots.blockedNameAfterFrame = blockedName?.textContent.trim();
+          snapshots.blockedNameHrefAfterFrame = blockedName?.getAttribute("href");
+          snapshots.blockedNameVisibilityAfterFrame = getComputedStyle(
+            blockedName
+          ).visibility;
+          snapshots.blockedNamePopupAfterFrame = Boolean(
+            blockedName?.closest("gg-avatar-popup-trigger")
+          );
+          const allowedName = document.getElementById("lazy-allowed-name");
+          snapshots.allowedNameCheckedAfterFrame = allowedName.hasAttribute(
+            checkedAttribute
+          );
+          snapshots.allowedNameVisibilityAfterFrame = getComputedStyle(
+            allowedName
+          ).visibility;
+        });
+      }, 750);
+
+      setTimeout(() => {
+        allowedPost.removeAttribute(checkedAttribute);
+        allowedPost
+          .querySelector(":scope > article.post")
+          .removeAttribute(checkedAttribute);
+        snapshots.safePostHiddenBeforeSweep =
+          getComputedStyle(allowedPost).visibility === "hidden";
+        document.getElementById("sweep-trigger").className = "render-settled";
+      }, 900);
+
+      setTimeout(() => {
+        snapshots.fullSweepRestoredCheck = allowedPost.hasAttribute(checkedAttribute);
+        snapshots.fullSweepRestoredVisibility = getComputedStyle(allowedPost).visibility;
+      }, 1050);
 
       setTimeout(() => {
         const body = blockedPost.querySelector(".post-body");
@@ -55,9 +187,11 @@
           <span ngbtooltip="You've blocked content from this user">Blocked User</span>
           <button type="button">Show hidden post</button>`;
 
-        const attribution = allowedPost.querySelector(".user-attribution");
+        const attribution = allowedPost.querySelector(
+          "#lazy-blocked-quote .user-attribution"
+        );
         attribution.firstChild.data = "Muted User\n@Muted User";
-      }, 50);
+      }, 1250);
 
       setTimeout(() => {
         const failures = [];
@@ -65,6 +199,78 @@
           if (!condition) failures.push(message);
         };
 
+        check(snapshots.pageReadyBeforeInsert, "page had not passed the 500 ms reveal ceiling");
+        check(snapshots.quarantineActive, "per-item quarantine was not active");
+        check(
+          snapshots.blockedVisibilityAtInsert === "hidden",
+          "new incomplete post was paintable at insertion"
+        );
+        check(
+          snapshots.quoteVisibilityAtInsert === "hidden",
+          "new unattributed quote was paintable at insertion"
+        );
+        check(
+          snapshots.anonymousQuoteDisplayAtInsert === "none",
+          "new anonymous quote bypassed pre-inspection quarantine"
+        );
+        check(
+          snapshots.explicitAnonymousQuoteDisplayAtInsert !== "none",
+          "BGG's explicit no-author quote was hidden while waiting for JavaScript"
+        );
+        check(
+          snapshots.blockedNameVisibilityAtInsert === "hidden" &&
+            snapshots.allowedNameVisibilityAtInsert === "hidden",
+          "new forum-list profile links were paintable before inspection"
+        );
+        check(snapshots.allowedCheckedAfterFrame, "safe post was not released within one frame");
+        check(
+          snapshots.allowedVisibilityAfterFrame === "visible",
+          "safe post remained hidden after inspection"
+        );
+        check(
+          snapshots.allowedQuoteCheckedAfterFrame &&
+            snapshots.allowedQuoteVisibilityAfterFrame === "visible",
+          "safe quotation was not released within one frame"
+        );
+        check(
+          snapshots.anonymousQuoteCheckedAfterFrame &&
+            snapshots.anonymousQuoteVisibilityAfterFrame === "visible" &&
+            snapshots.anonymousQuoteDisplayAfterFrame !== "none",
+          "populated anonymous quotation remained an invisible layout gap"
+        );
+        check(
+          snapshots.explicitAnonymousQuoteCheckedAfterFrame &&
+            snapshots.explicitAnonymousQuoteDisplayAfterFrame !== "none",
+          "BGG's explicit no-author quotation remained hidden"
+        );
+        check(
+          snapshots.blockedStillPresentAfterFrame &&
+            snapshots.blockedVisibilityAfterFrame === "hidden",
+          "incomplete post was revealed or removed before it could be inspected"
+        );
+        check(
+          snapshots.quoteStillPresentAfterFrame &&
+            snapshots.quoteDisplayAfterFrame === "none",
+          "unattributed quote was revealed before hydration"
+        );
+        check(
+          snapshots.blockedNameAfterFrame === "Blocked" &&
+            snapshots.blockedNameHrefAfterFrame === null &&
+            snapshots.blockedNameVisibilityAfterFrame === "visible" &&
+            !snapshots.blockedNamePopupAfterFrame,
+          "blocked forum-list name was not safely redacted within one frame"
+        );
+        check(
+          snapshots.allowedNameCheckedAfterFrame &&
+            snapshots.allowedNameVisibilityAfterFrame === "visible",
+          "allowed forum-list name was not released within one frame"
+        );
+        check(snapshots.safePostHiddenBeforeSweep, "backup sweep setup did not hide the post");
+        check(
+          snapshots.fullSweepRestoredCheck &&
+            snapshots.fullSweepRestoredVisibility === "visible",
+          "debounced full-document sweep did not recover a missed safe post"
+        );
         check(
           !document.getElementById("lazy-blocked-post"),
           "post assembled after insertion was not removed"
@@ -76,8 +282,8 @@
         check(Boolean(document.getElementById("lazy-allowed-reply")), "allowed reply was removed");
 
         document.body.dataset.status = failures.length ? "fail" : "pass";
-        document.body.dataset.report = JSON.stringify({ failures });
-      }, 180);
+        document.body.dataset.report = JSON.stringify({ failures, snapshots });
+      }, 1500);
     </script>
   </body>
 </html>
