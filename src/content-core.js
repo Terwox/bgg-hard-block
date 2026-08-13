@@ -46,8 +46,10 @@
   // and server-rendered posts do not always arrive with the same outer wrapper.
   const POST_SELECTOR = "gg-post, article.post";
   const QUOTE_SELECTOR = "gg-markup-quote";
-  const THREAD_PROFILE_LINK_SELECTOR =
-    'gg-thread-listing a[href*="/profile/"]';
+  const REDACTABLE_PROFILE_LINK_SELECTOR = [
+    'gg-thread-listing a[href*="/profile/"]',
+    'gg-reactions-list-popover gg-thumbs-list a[href*="/profile/"]'
+  ].join(", ");
   const REDACTED_PROFILE_ATTRIBUTE = "data-bgg-hard-blocker-redacted";
 
   // Matches one BBCode quote token: [q], [q=name], [q="name"], [q='name'], [/q].
@@ -352,22 +354,24 @@
   }
 
   /**
-   * Replace blocked usernames in BGG thread listings without removing threads.
+   * Replace blocked usernames on retained discussion surfaces.
    *
    * Forum indexes expose both the thread author and latest-reply author as
    * profile links, sometimes duplicated for responsive layouts. Removing the
    * whole listing would hide allowed conversations merely because a blocked
-   * user participated. Instead, keep the row and replace each matching name
-   * with a fresh `Blocked` label. Replacing BGG's whole avatar-popup trigger is
-   * deliberate: emptying the original link is not enough because Angular's
-   * bound hover handler can still open the user's profile card after the
-   * identifying attributes are gone.
+   * user participated. Thumbs popovers likewise mix allowed and blocked users
+   * in one list. Keep both containers and replace each matching name with a
+   * fresh `Blocked` label.
+   *
+   * Replacing BGG's component shell is deliberate: emptying the original link
+   * is not enough because Angular can retain bound behavior on its avatar-popup
+   * or username-link wrapper after the identifying attributes are gone.
    */
   function redactBlockedProfileNames(root, blockedUsernames) {
     const blocked = makeBlockedSet(blockedUsernames);
     let redacted = 0;
 
-    for (const link of collectElements(root, THREAD_PROFILE_LINK_SELECTOR)) {
+    for (const link of collectElements(root, REDACTABLE_PROFILE_LINK_SELECTOR)) {
       if (
         !link.isConnected ||
         link.hasAttribute(REDACTED_PROFILE_ATTRIBUTE)
@@ -385,8 +389,10 @@
       label.className = "bgg-hard-blocker-redacted-name";
       label.setAttribute(REDACTED_PROFILE_ATTRIBUTE, "");
 
-      const popupTrigger = link.closest("gg-avatar-popup-trigger");
-      (popupTrigger || link).replaceWith(label);
+      const interactiveShell = link.closest(
+        "gg-avatar-popup-trigger, gg-username-link"
+      );
+      (interactiveShell || link).replaceWith(label);
       redacted += 1;
     }
 
@@ -487,7 +493,7 @@
    * @param {Node} root Document or subtree to filter.
    * @param {Iterable<string>|Set<string>} blockedUsernames
    * @returns {{posts: number, quotes: number, profileNames: number}} How many
-   *   posts/quotes were removed and forum-list names were redacted.
+   *   posts/quotes were removed and retained-surface names were redacted.
    */
   function filterDom(root, blockedUsernames) {
     const blocked = makeBlockedSet(blockedUsernames);

@@ -13,7 +13,7 @@
               return {
                 bggHardBlockerConsent: {
                   granted: true,
-                  disclosureVersion: "2026-08-10"
+                  disclosureVersion: "2026-08-13"
                 }
               };
             },
@@ -88,6 +88,40 @@
           <span>AllowedUser</span>
         </a>`;
 
+      const reactionPopover = document.createElement("gg-reactions-list-popover");
+      reactionPopover.id = "lazy-thumbs-popover";
+      reactionPopover.innerHTML = `
+        <gg-thumbs-list reactiontype="thumbs">
+          <gg-thumbs-list-scroll>
+            <div class="reaction-list">
+              <ol>
+                <li id="lazy-blocked-thumb-slot">
+                  <strong>
+                    <gg-username-link>
+                      <gg-username-link-dumb>
+                        <a id="lazy-blocked-thumb-name" href="/profile/Muted%20User">
+                          Muted User
+                        </a>
+                      </gg-username-link-dumb>
+                    </gg-username-link>
+                  </strong>
+                </li>
+                <li>
+                  <strong>
+                    <gg-username-link>
+                      <gg-username-link-dumb>
+                        <a id="lazy-allowed-thumb-name" href="/profile/AllowedThumb">
+                          AllowedThumb
+                        </a>
+                      </gg-username-link-dumb>
+                    </gg-username-link>
+                  </strong>
+                </li>
+              </ol>
+            </div>
+          </gg-thumbs-list-scroll>
+        </gg-thumbs-list>`;
+
       setTimeout(() => {
         snapshots.pageReadyBeforeInsert = document.documentElement.hasAttribute(
           "data-bgg-hard-blocker-ready"
@@ -95,7 +129,7 @@
         snapshots.quarantineActive = document.documentElement.hasAttribute(
           quarantineAttribute
         );
-        feed.append(blockedPost, allowedPost, forumRow);
+        feed.append(blockedPost, allowedPost, forumRow, reactionPopover);
 
         snapshots.blockedVisibilityAtInsert = getComputedStyle(blockedPost).visibility;
         snapshots.quoteVisibilityAtInsert = getComputedStyle(
@@ -112,6 +146,12 @@
         ).visibility;
         snapshots.allowedNameVisibilityAtInsert = getComputedStyle(
           document.getElementById("lazy-allowed-name")
+        ).visibility;
+        snapshots.blockedThumbVisibilityAtInsert = getComputedStyle(
+          document.getElementById("lazy-blocked-thumb-name")
+        ).visibility;
+        snapshots.allowedThumbVisibilityAtInsert = getComputedStyle(
+          document.getElementById("lazy-allowed-thumb-name")
         ).visibility;
 
         requestAnimationFrame(() => {
@@ -162,6 +202,24 @@
           );
           snapshots.allowedNameVisibilityAfterFrame = getComputedStyle(
             allowedName
+          ).visibility;
+          const blockedThumbName = document.querySelector(
+            "#lazy-blocked-thumb-slot [data-bgg-hard-blocker-redacted]"
+          );
+          snapshots.blockedThumbNameAfterFrame = blockedThumbName?.textContent.trim();
+          snapshots.blockedThumbHrefAfterFrame = blockedThumbName?.getAttribute("href");
+          snapshots.blockedThumbVisibilityAfterFrame = getComputedStyle(
+            blockedThumbName
+          ).visibility;
+          snapshots.blockedThumbWrapperAfterFrame = Boolean(
+            blockedThumbName?.closest("gg-username-link")
+          );
+          const allowedThumbName = document.getElementById("lazy-allowed-thumb-name");
+          snapshots.allowedThumbCheckedAfterFrame = allowedThumbName.hasAttribute(
+            checkedAttribute
+          );
+          snapshots.allowedThumbVisibilityAfterFrame = getComputedStyle(
+            allowedThumbName
           ).visibility;
         });
       }, 750);
@@ -222,6 +280,11 @@
             snapshots.allowedNameVisibilityAtInsert === "hidden",
           "new forum-list profile links were paintable before inspection"
         );
+        check(
+          snapshots.blockedThumbVisibilityAtInsert === "hidden" &&
+            snapshots.allowedThumbVisibilityAtInsert === "hidden",
+          "new thumbs-list profile links were paintable before inspection"
+        );
         check(snapshots.allowedCheckedAfterFrame, "safe post was not released within one frame");
         check(
           snapshots.allowedVisibilityAfterFrame === "visible",
@@ -264,6 +327,18 @@
           snapshots.allowedNameCheckedAfterFrame &&
             snapshots.allowedNameVisibilityAfterFrame === "visible",
           "allowed forum-list name was not released within one frame"
+        );
+        check(
+          snapshots.blockedThumbNameAfterFrame === "Blocked" &&
+            snapshots.blockedThumbHrefAfterFrame === null &&
+            snapshots.blockedThumbVisibilityAfterFrame === "visible" &&
+            !snapshots.blockedThumbWrapperAfterFrame,
+          "blocked thumbs-list name was not safely redacted within one frame"
+        );
+        check(
+          snapshots.allowedThumbCheckedAfterFrame &&
+            snapshots.allowedThumbVisibilityAfterFrame === "visible",
+          "allowed thumbs-list name was not released within one frame"
         );
         check(snapshots.safePostHiddenBeforeSweep, "backup sweep setup did not hide the post");
         check(

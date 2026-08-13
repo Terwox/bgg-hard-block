@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective date:** August 10, 2026
+**Effective date:** August 13, 2026
 
 **Developer:** Terwox
 
@@ -19,14 +19,16 @@ to the new version before processing BGG data again.
 
 - BGG Hidden Users identifiers and the public BGG usernames associated with them
 - discussion content and author attribution markup rendered on BGG forum indexes,
-  forum threads, GeekLists, images, videos, files, and individual blog posts
+  forum threads, thumbs lists, GeekLists, images, videos, files, and individual
+  blog posts
 - reply-draft text BGG inserts into the editor after the user clicks Quote
 - the current BGG page address, used only for local status reporting
 - the signed-in BGG authorization value, used only in page memory to call BGG's own API
 - the user's subscription-linking preference and local status counts
 
 The extension uses this data only to redact blocked author names on forum
-indexes; remove blocked posts, native blocked-user placeholders, quotations
+indexes and thumbs popovers; remove blocked posts, native blocked-user
+placeholders, quotations
 attributed to blocked users, and complete blocked-user quotation subtrees from
 BGG-generated reply drafts; report local removal/redaction counts; and, if the
 user leaves subscription linking enabled, add missing user-level subscription

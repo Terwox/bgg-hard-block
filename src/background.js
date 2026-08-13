@@ -41,7 +41,9 @@ const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
     ? "2026-08-05"
     : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION)
       ? "2026-08-06"
-      : "2026-08-10";
+      : /^0\.3\.1[34]$/.test(LOADED_EXTENSION_VERSION)
+        ? "2026-08-10"
+        : "2026-08-13";
 
 // Match-pattern form, for chrome.tabs.query. Kept deliberately identical to the
 // `content_scripts[].matches` list in manifest.json — if you add a surface to

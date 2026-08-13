@@ -52,9 +52,9 @@ html:not([data-bgg-hard-blocker-ready]):not([data-bgg-hard-blocker-running]) bod
  * 3. Quarantine dynamically inserted author-bearing content until inspected.
  *
  * The whole-page hold ends after the initial pass, but BGG can add or hydrate
- * discussion content much later. New posts, quotations, and forum-list profile
- * links therefore start invisible and content.js marks only known-allowed
- * items as checked. Because
+ * discussion content much later. New posts, quotations, forum-list profile
+ * links, and thumbs-list profile links therefore start invisible and content.js
+ * marks only known-allowed items as checked. Because
  * this selector depends on the *absence* of that marker, it applies as soon as
  * the DOM node exists, before the MutationObserver callback and browser paint.
  *
@@ -80,10 +80,18 @@ html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
   visibility: hidden !important;
 }
 
+html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
+  gg-reactions-list-popover
+  gg-thumbs-list
+  a[href*="/profile/"]:not([data-bgg-hard-blocker-checked]) {
+  visibility: hidden !important;
+}
+
 /*
- * A redacted forum-list name is plain text, not BGG's original profile-link or
- * avatar-popup component. Keeping it out of pointer hit-testing is a second
- * guard against delegated hover behavior reintroducing a user card later.
+ * A redacted name is plain text, not BGG's original profile-link,
+ * avatar-popup, or username-link component. Keeping it out of pointer
+ * hit-testing is a second guard against delegated behavior reintroducing a
+ * user card later.
  */
 .bgg-hard-blocker-redacted-name {
   cursor: default;
