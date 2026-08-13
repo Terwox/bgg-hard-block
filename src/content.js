@@ -64,7 +64,9 @@
       ? "2026-08-05"
       : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION)
         ? "2026-08-06"
-        : "2026-08-10";
+        : /^0\.3\.1[34]$/.test(LOADED_EXTENSION_VERSION)
+          ? "2026-08-10"
+          : "2026-08-13";
 
   const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
   const DATA_EVENT = "bgg-hard-blocker:blocklist";
@@ -79,12 +81,14 @@
   const CHECKED_ATTRIBUTE = "data-bgg-hard-blocker-checked";
   const POST_SELECTOR = "gg-post, article.post";
   const QUOTE_SELECTOR = "gg-markup-quote";
-  const THREAD_PROFILE_LINK_SELECTOR =
-    'gg-thread-listing a[href*="/profile/"]';
+  const REDACTABLE_PROFILE_LINK_SELECTOR = [
+    'gg-thread-listing a[href*="/profile/"]',
+    'gg-reactions-list-popover gg-thumbs-list a[href*="/profile/"]'
+  ].join(", ");
   const FILTERABLE_SELECTOR = [
     POST_SELECTOR,
     QUOTE_SELECTOR,
-    THREAD_PROFILE_LINK_SELECTOR
+    REDACTABLE_PROFILE_LINK_SELECTOR
   ].join(", ");
   const QUOTE_BUTTON_SELECTOR = "gg-post button.post-btn";
   const QUOTE_EDITOR_SELECTOR = "textarea.post-textarea[name=\"text\"]";
@@ -207,7 +211,7 @@
       }
     }
 
-    for (const link of collectElements(root, THREAD_PROFILE_LINK_SELECTOR)) {
+    for (const link of collectElements(root, REDACTABLE_PROFILE_LINK_SELECTOR)) {
       const author = core.usernameFromProfileHref(link.getAttribute("href"));
       if (author && !blockedUsernames.has(author)) {
         link.setAttribute(CHECKED_ATTRIBUTE, "");
@@ -506,8 +510,9 @@
   // Attribute filtering is narrow on purpose. These are the attributes that
   // can change a filtering decision after a post is already in the DOM:
   // `content`/`itemprop` (microdata author), `data-username` (quote author),
-  // `href` (profile link hydration), `ngbtooltip` (native blocked marker), and
-  // `class` (Angular turning a generic shell into filterable markup).
+  // `href` (profile/reaction link hydration), `ngbtooltip` (native blocked
+  // marker), and `class` (Angular turning a generic shell into filterable
+  // markup).
   // Watching all attributes would fire on every hover and animation frame.
   observer.observe(document.documentElement, {
     attributes: true,

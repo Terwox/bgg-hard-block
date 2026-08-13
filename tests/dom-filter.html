@@ -121,6 +121,35 @@
           </span>
         </div>
       </gg-thread-listing>
+
+      <gg-reactions-list-popover id="thumbs-popover">
+        <gg-thumbs-list reactiontype="thumbs">
+          <ol>
+            <li id="blocked-thumb-slot">
+              <strong>
+                <gg-username-link>
+                  <gg-username-link-dumb>
+                    <a href="/profile/Muted%20User">Muted User</a>
+                  </gg-username-link-dumb>
+                </gg-username-link>
+              </strong>
+            </li>
+            <li>
+              <strong>
+                <gg-username-link>
+                  <gg-username-link-dumb>
+                    <a id="allowed-thumb-name" href="/profile/AllowedThumb">AllowedThumb</a>
+                  </gg-username-link-dumb>
+                </gg-username-link>
+              </strong>
+            </li>
+          </ol>
+        </gg-thumbs-list>
+      </gg-reactions-list-popover>
+
+      <a id="unrelated-blocked-profile-link" href="/profile/Muted%20User">
+        Muted User outside a redacted surface
+      </a>
     </main>
 
     <script src="../src/content-core.js"></script>
@@ -139,8 +168,8 @@
       check(result.posts === 3, `expected 3 removed posts, got ${result.posts}`);
       check(result.quotes === 2, `expected 2 removed quotes, got ${result.quotes}`);
       check(
-        result.profileNames === 2,
-        `expected 2 redacted profile names, got ${result.profileNames}`
+        result.profileNames === 3,
+        `expected 3 redacted profile names, got ${result.profileNames}`
       );
       check(!document.getElementById("blocked-direct-post"), "blocked author's post remains");
       check(!document.getElementById("native-placeholder"), "native placeholder remains");
@@ -186,10 +215,17 @@
         ),
         document.querySelector(
           "#blocked-latest-author-slot [data-bgg-hard-blocker-redacted]"
+        ),
+        document.querySelector(
+          "#blocked-thumb-slot [data-bgg-hard-blocker-redacted]"
         )
       ];
       for (const [index, redacted] of redactedNames.entries()) {
-        const id = index === 0 ? "blocked-thread-author" : "blocked-latest-author";
+        const id = [
+          "blocked-thread-author",
+          "blocked-latest-author",
+          "blocked-thumb-user"
+        ][index];
         check(redacted?.textContent === "Blocked", `${id} did not become Blocked`);
         check(redacted?.tagName === "SPAN", `${id} did not become plain text`);
         check(!redacted?.hasAttribute("href"), `${id} still exposes a profile URL`);
@@ -201,6 +237,10 @@
           !redacted?.closest("gg-avatar-popup-trigger"),
           `${id} retained BGG's avatar-popup trigger`
         );
+        check(
+          !redacted?.closest("gg-username-link"),
+          `${id} retained BGG's username-link wrapper`
+        );
       }
       redactedNames[0]?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
       check(!originalPopup.isConnected, "blocked user's popup trigger remains connected");
@@ -211,9 +251,21 @@
           allowedThreadAuthor?.getAttribute("href") === "/profile/AllowedUser",
         "allowed forum-list author was changed"
       );
+      const allowedThumbName = document.getElementById("allowed-thumb-name");
+      check(
+        allowedThumbName?.textContent === "AllowedThumb" &&
+          allowedThumbName?.getAttribute("href") === "/profile/AllowedThumb",
+        "allowed thumbs-list username was changed"
+      );
+      check(
+        document.getElementById("unrelated-blocked-profile-link")?.textContent.includes(
+          "Muted User"
+        ),
+        "profile link outside a supported redaction surface was changed"
+      );
       check(
         BggHardBlockerCore.filterDom(document, ["Muted User"]).profileNames === 0,
-        "forum-list redaction was not idempotent"
+        "profile-name redaction was not idempotent"
       );
 
       const nestedDraft = `[q="Allowed Reply"]

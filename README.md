@@ -19,8 +19,8 @@ This extension removes:
 - complete posts or comments authored by anyone on your BGG Hidden Users list
 - quotations attributed to blocked users, while preserving the surrounding reply
 - blocked quotation subtrees from the reply draft BGG creates when you click **Quote**
-- blocked authors' names from forum indexes, replacing each with **Blocked** while
-  preserving the thread listing
+- blocked authors' names from forum indexes and thumbs popovers, replacing each
+  with **Blocked** while preserving the surrounding listing
 
 There is intentionally no "show anyway" override.
 
@@ -131,21 +131,23 @@ never sends it to the isolated content script or saves it.
 
 The isolated content script caches only the consent record, blocked usernames,
 the subscription-linking option, and status counts in `chrome.storage.local`. A
-`MutationObserver` applies the same filter to posts and thread listings loaded
-dynamically. On forum indexes, blocked thread-author and latest-reply profile
-links and their avatar-popup triggers become plain **Blocked** labels with no
-profile card on hover; thread titles, dates, statistics, and navigation remain
-intact. Profile ID-to-name mappings are cached for 30 days in
-BGG's own local storage to avoid repeating every public profile request on every
-page.
+`MutationObserver` applies the same filter to posts, thread listings, and thumbs
+popovers loaded dynamically. On forum indexes, blocked thread-author and
+latest-reply profile links and their avatar-popup triggers become plain
+**Blocked** labels with no profile card on hover; thread titles, dates,
+statistics, and navigation remain intact. In a post's thumbs popover, each
+blocked giver likewise becomes an inert **Blocked** label while allowed givers
+remain normal profile links. Profile ID-to-name mappings are cached for 30 days
+in BGG's own local storage to avoid repeating every public profile request on
+every page.
 
 The discussion page stays hidden until the first filtering pass completes, so
 blocked content does not flash onscreen. Live synchronization reveals it
 immediately; otherwise it is revealed no later than 500 ms after
 `DOMContentLoaded`. After that initial reveal, each newly inserted post,
-quotation, and forum-list profile link remains invisible until its author is
-known and allowed; ordinarily the mutation filter releases safe content before
-the next frame. Progressively
+quotation, forum-list profile link, and thumbs-list profile link remains
+invisible until its author is known and allowed; ordinarily the mutation filter
+releases safe content before the next frame. Progressively
 hydrated content stays quarantined until its identifying text, links, or
 attributes arrive. Quotes collapse rather than reserving an invisible rectangle
 while quarantined. Intentionally anonymous `[q]` quotations—including BGG's
@@ -183,7 +185,8 @@ normalization, authenticated API bridging, credential non-disclosure,
 pre-consent inactivity, affirmative onboarding, consent-triggered discussion-tab
 refresh, path-limited manifest scope, in-page discussion-route injection,
 default-on and opt-out subscription linking, page reveal behavior, lazy post and
-quotation insertion after the initial reveal, forum-index name redaction,
+quotation insertion after the initial reveal, forum-index and thumbs-list name
+redaction,
 progressive hydration, per-item paint quarantine, full-sweep recovery,
 quote-composer sanitization, and status storage.
 
@@ -206,7 +209,7 @@ destinations are out of bounds.
 ## Current BGG assumptions
 
 The implementation was checked against BGG's live Angular discussion markup on
-August 10, 2026:
+August 13, 2026:
 
 - posts are wrapped in `gg-post` with an `article.post`
 - native blocked posts render `Blocked User`, `Show Anyway`, and an
@@ -216,6 +219,8 @@ August 10, 2026:
   `textarea.post-textarea[name="text"]`
 - forum indexes render each row as `gg-thread-listing` and expose thread-author
   and latest-reply names through `/profile/<username>` links
+- thumbs popovers render as `gg-reactions-list-popover`, with profile links
+  nested under `gg-thumbs-list` and `gg-username-link`
 - forum threads, GeekLists, images, videos, files, and blog-post comments use the
   shared `gg-comments`/`gg-post` component family
 - the authenticated block-list endpoint returns numeric user IDs

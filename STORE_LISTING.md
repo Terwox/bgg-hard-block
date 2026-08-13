@@ -27,6 +27,8 @@ BGG Hard Block removes:
 - complete discussion posts or comments written by anyone on your BGG Hidden Users list
 - quotations attributed to hidden users, while preserving the surrounding reply
 - blocked quotation subtrees from the reply draft BGG creates when you click Quote
+- blocked usernames from forum indexes and thumbs popovers, replacing them with
+  Blocked
 
 By default, it also adds Hidden Users to BGG's separate user-level subscription
 blocks. You can turn that linking off in Options. The extension never removes a
@@ -70,9 +72,9 @@ synced to the developer or a third party.
 ### BoardGameGeek page access
 
 Required to read BGG's Hidden Users list through BGG's own HTTPS API, identify
-authors in rendered discussion markup, redact matching names on forum indexes,
-remove matching posts/placeholders/quotations, sanitize the reply draft BGG
-creates after a Quote click, and optionally add missing user-level subscription
+authors in rendered discussion markup, redact matching names on forum indexes
+and thumbs popovers, remove matching posts/placeholders/quotations, sanitize the
+reply draft BGG creates after a Quote click, and optionally add missing user-level subscription
 blocks to the signed-in BGG account. Filtering and BGG-data code is injected only
 on canonical HTTPS forum indexes, forum threads, GeekLists, images, videos,
 files, and individual blog posts. It does not run on unrelated BGG

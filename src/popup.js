@@ -28,7 +28,9 @@
       ? "2026-08-05"
       : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION)
         ? "2026-08-06"
-        : "2026-08-10";
+        : /^0\.3\.1[34]$/.test(LOADED_EXTENSION_VERSION)
+          ? "2026-08-10"
+          : "2026-08-13";
 
   const STORAGE_KEY = "bggHardBlockerState";
   const OPTIONS_KEY = "bggHardBlockerOptions";
