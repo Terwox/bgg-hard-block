@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective date:** August 13, 2026
+**Effective date:** August 15, 2026
 
 **Developer:** Terwox
 
@@ -22,8 +22,10 @@ to the new version before processing BGG data again.
   forum threads, thumbs lists, GeekLists, images, videos, files, and individual
   blog posts
 - reply-draft text BGG inserts into the editor after the user clicks Quote
-- the current BGG page address, used only for local status reporting
-- the signed-in BGG authorization value, used only in page memory to call BGG's own API
+- the current BGG page address, checked only in memory to enforce the supported
+  discussion-page scope and never retained
+- the signed-in BGG authorization value, used only in temporary page/background
+  memory to call BGG's own API
 - the user's subscription-linking preference and local status counts
 
 The extension uses this data only to redact blocked author names on forum
@@ -36,28 +38,64 @@ blocks to their BGG account. It never removes a subscription block.
 
 ## Data storage
 
-The extension stores the user's consent record, blocked usernames, subscription-
-linking preference, latest synchronization time, current-page removal counts,
-subscription-linking status counts, and latest discussion URL in Chrome's local extension
-storage. BGG profile identifier-to-name mappings are cached in BGG local storage
-for up to 30 days to avoid repeated profile requests.
+The complete local-storage map is:
+
+| Storage entry | Contents |
+| --- | --- |
+| `bggHardBlockerConsent` | Consent granted flag, disclosure version, and grant time |
+| `bggHardBlockerOptions` | Subscription-linking option |
+| `bggHardBlockerState` | A provenance schema marker; blocked public usernames; synchronization/result status; blocked, removed, and redacted counts; unresolved count; update times |
+| `bggHardBlockerProfileCache` | Blocked BGG profile ID→public username mappings and update times |
+| `bggHardBlockerSubscriptionState` | Whether linking is enabled and its synchronization, added, failed, and blocked-user counts and update times |
+
+All five entries use `chrome.storage.local`. Profile-cache entries older than
+30 days are never reused; the next successful synchronization removes them and
+entries whose IDs are no longer in the current BGG Hidden Users result. Version
+0.4.0 also removes the obsolete profile cache that earlier
+versions placed in BGG-origin `localStorage`. It rejects and removes unversioned
+block-list state written by the former page-data bridge before using a cache.
 
 Reply drafts are processed only in the currently open BGG page. The extension
 does not store them in Chrome extension storage, BGG local storage, or anywhere
 else.
 
 The extension's filtering and BGG-data code is limited to canonical HTTPS URLs for those seven BGG
-discussion page families. It does not inject on BGG's home page, game pages,
-collection, store, account pages, or any other site. Chrome treats
-host permissions as origin-wide even when URL paths are declared; the single BGG
-host permission is used by the background worker only to identify supported open
-discussion tabs for automatic refresh after consent or an extension update and to
-attach the same discussion-only code when BGG enters one of those URLs through an
-in-page route change rather than a new document load.
+discussion page families. It does not activate filtering or credential capture
+on BGG's home page, game pages, collection, store, account pages, or any other
+site. After a single-page route leaves a supported page, a tiny local teardown
+function may run on the destination BGG page only to remove previously installed
+behavior; it reads no page data and makes no network request. Chrome treats
+host permissions as origin-wide even when URL paths are declared. The canonical
+BoardGameGeek origin is used to identify and attach code only on supported
+discussion pages. The canonical `api.geekdo.com` origin is used only for the
+enumerated Hidden Users, public-profile, and optional subscription-block API
+requests described below.
 
-The extension does not store the BGG `GeekAuth` authorization value. It exists only
-in page memory while the live block list is synchronized and is never exposed to
-the extension's isolated content scripts.
+The extension does not store the BGG `GeekAuth` authorization value. A
+document-bound MAIN-world capture returns it privately to the background worker,
+which uses it only during the current synchronization and then clears its
+reference. It is never exposed to the DOM or isolated content script. The worker
+constructs only enumerated exact `https://api.geekdo.com` requests, refuses
+redirects, and does not accept API response data or request parameters from page
+code.
+
+There is no declarative MAIN-world or settings bridge. The isolated content
+script asks the background worker to inject credential-capture code into its
+exact sending document. The worker checks current consent and the subscription
+option before capture, before network work, before each subscription addition,
+and before it saves or returns the public result. Usernames and status return
+only through Chrome extension messaging; there is no page-DOM data bridge. The
+only cross-world DOM event is a data-free, random-nonce-bound revocation signal
+when the page wrapper observes a native Hidden Users mutation. Its isolated
+relay can only ask the worker to pause optional subscription linking for that
+active document; it carries no user data, credential, identifier, destination,
+or write authority.
+
+The worker reads Hidden Users again immediately before each subscription
+addition. Geekdo nevertheless provides only a separate `GET` and unconditional
+`PUT`, with no conditional revision token, so those requests are not atomic. A
+native Hidden Users change can occur between them; the revocation signal reduces
+that race window but does not eliminate it.
 
 ## Data sharing
 
@@ -76,9 +114,10 @@ used for advertising or credit decisions, or made available for human review.
 ## Retention and deletion
 
 Local extension data remains in the Chrome profile until Chrome clears it or the
-extension is removed. Cached BGG profile mappings expire after 30 days. Removing
-the extension deletes its Chrome extension storage; BGG site data can also be
-cleared through Chrome's site-data controls. Subscription blocks already written
+extension is removed. Cached BGG profile mappings older than 30 days are ignored
+and removed by the next successful synchronization, which also prunes mappings
+to IDs in the current Hidden Users result. Removing the extension
+deletes its Chrome extension storage. Subscription blocks already written
 to the BGG account remain under the user's control in BGG's native subscription-
 block editor.
 

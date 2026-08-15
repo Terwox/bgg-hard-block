@@ -209,6 +209,46 @@
         BggHardBlockerCore.usernameFromProfileHref("/profile/Muted%20User") === "muted user",
         "encoded profile username was not normalized"
       );
+      check(
+        BggHardBlockerCore.usernameFromProfileHref(
+          "https://boardgamegeek.com/profile/Caf%C3%A9%20Fan?source=test#profile"
+        ) === "café fan",
+        "UTF-8 profile username was not decoded before normalization"
+      );
+      check(
+        BggHardBlockerCore.usernameFromProfileHref("/profile/Bad%E0%A4%A") ===
+          "bad%e0%a4%a",
+        "malformed profile encoding did not fail safe as literal text"
+      );
+      check(
+        BggHardBlockerCore.usernameFromProfileHref("/user/Muted%20User") === "",
+        "non-profile href was interpreted as a profile username"
+      );
+      for (const href of [
+        "https://evil.example/profile/Muted%20User",
+        "//evil.example/profile/Muted%20User",
+        "https://boardgamegeek.com.evil.example/profile/Muted%20User",
+        "https://attacker@boardgamegeek.com/profile/Muted%20User",
+        "http://boardgamegeek.com/profile/Muted%20User",
+        "/nested/profile/Muted%20User",
+        "/profile/Muted%20User/extra",
+        "/profile/Muted%2FUser"
+      ]) {
+        check(
+          BggHardBlockerCore.usernameFromProfileHref(href) === "",
+          `non-canonical profile href was accepted: ${href}`
+        );
+      }
+      check(
+        BggHardBlockerCore.normalizeUsername("Iİ") === "ii\u0307",
+        "username casing did not use the locale-stable en-US mapping"
+      );
+      check(
+        !BggHardBlockerCore.makeBlockedSet(["Alice"]).has(
+          BggHardBlockerCore.normalizeUsername("\u0410lice")
+        ),
+        "Cyrillic and Latin username homoglyphs were treated as equivalent"
+      );
       const redactedNames = [
         document.querySelector(
           "#blocked-thread-author-slot [data-bgg-hard-blocker-redacted]"
@@ -290,9 +330,41 @@ Allowed reply survives.
         ) === '[q="Muted User"]unclosed quotation',
         "unbalanced BBCode was destructively removed"
       );
+      const malformedNestedDraft =
+        'Before [q="Muted User"][q="Allowed User"]nested[/q] unclosed outer';
+      check(
+        BggHardBlockerCore.sanitizeBlockedQuotes(
+          malformedNestedDraft,
+          ["Muted User"]
+        ) === malformedNestedDraft,
+        "unclosed outer quote caused a nested subtree to be truncated"
+      );
+      check(
+        BggHardBlockerCore.sanitizeBlockedQuotes(
+          'Before [/q][q="Muted User"]blocked[/q] after',
+          ["Muted User"]
+        ) === "Before [/q] after",
+        "stray closing BBCode tag corrupted a later balanced blocked quote"
+      );
+
+      const attackerSizedDraft = '[q="' + "x".repeat(1024 * 1024);
+      const stressStartedAt = performance.now();
+      const attackerSizedResult = BggHardBlockerCore.sanitizeBlockedQuotes(
+        attackerSizedDraft,
+        ["Muted User"]
+      );
+      const stressDurationMs = performance.now() - stressStartedAt;
+      check(
+        attackerSizedResult === attackerSizedDraft,
+        "attacker-sized malformed quote input was modified"
+      );
+      check(
+        stressDurationMs < 1500,
+        `attacker-sized quote parsing exceeded 1500 ms (${stressDurationMs.toFixed(1)} ms)`
+      );
 
       document.body.dataset.status = failures.length ? "fail" : "pass";
-      document.body.dataset.report = JSON.stringify({ failures, result });
+      document.body.dataset.report = JSON.stringify({ failures, result, stressDurationMs });
     </script>
   </body>
 </html>

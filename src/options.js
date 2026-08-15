@@ -34,7 +34,9 @@
         ? "2026-08-06"
         : /^0\.3\.1[34]$/.test(LOADED_EXTENSION_VERSION)
           ? "2026-08-10"
-          : "2026-08-13";
+          : /^0\.3\.15$/.test(LOADED_EXTENSION_VERSION)
+            ? "2026-08-13"
+            : "2026-08-15";
 
   const OPTIONS_KEY = "bggHardBlockerOptions";
   const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
@@ -47,7 +49,7 @@
    * Turn the stored sync state into a sentence.
    *
    * The state values originate in `reconcileSubscriptionBlocks` in
-   * `src/page-bridge.js`. Note that `error` explicitly reassures the user that
+   * `src/background.js`. Note that `error` explicitly reassures the user that
    * discussion blocking still works — a failed link is a degraded convenience,
    * not a failure of the core feature, and the wording should not cause alarm.
    */
@@ -58,6 +60,10 @@
 
     if (state.enabled === false) {
       return "Subscription linking is off.";
+    }
+
+    if (state.state === "error" && state.deferred === true) {
+      return "BGG’s native Hidden Users changed. Subscription linking paused and will retry on the next supported discussion page load.";
     }
 
     const labels = {
@@ -81,7 +87,7 @@
     const consentGranted =
       consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
 
-    // Default-on, matching settings-bridge.js.
+    // Default-on, matching onboarding.js.
     checkbox.checked = stored?.[OPTIONS_KEY]?.linkSubscriptionBlocks !== false;
     // Without consent the toggle is inert: the extension is not running at all,
     // so letting the user adjust its settings would misrepresent the state.
@@ -123,13 +129,15 @@
     chrome.tabs.create({ url: chrome.runtime.getURL("src/onboarding.html") });
   });
 
-  // Live updates: consent may be granted in another tab, and sync state is
-  // written by the settings bridge while a BGG page is open.
+  // Live updates: consent may be granted in another tab, and the background
+  // worker writes sync state while a BGG discussion page is open.
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "local" && changes[CONSENT_KEY]) {
       render();
     } else if (areaName === "local" && changes[SUBSCRIPTION_STATE_KEY]) {
-      syncStatus.textContent = describeSync(changes[SUBSCRIPTION_STATE_KEY].newValue);
+      syncStatus.textContent = checkbox.checked
+        ? describeSync(changes[SUBSCRIPTION_STATE_KEY].newValue)
+        : "Subscription linking is off.";
     }
   });
 

@@ -17,7 +17,7 @@ will usually be declined, because each one weakens the privacy story that makes
 the extension auditable:
 
 - **New permissions.** The extension requests only `scripting` and `storage`,
-  plus one host permission for `boardgamegeek.com`. Adding `tabs`,
+  plus host access for `boardgamegeek.com` and `api.geekdo.com`. Adding `tabs`,
   `webNavigation`, or `<all_urls>` is out of scope.
 - **New network destinations.** The extension talks only to
   `boardgamegeek.com` and `api.geekdo.com`. No analytics, no telemetry, no
@@ -36,7 +36,16 @@ turns out to be out of scope.
 
 ## Development setup
 
-There is nothing to install. Load the repository directly:
+The extension itself has no runtime dependencies or build step. To contribute,
+install the hash-locked browser-test dependency:
+
+```bash
+python3 -m venv ../bgg-hard-block-venv
+source ../bgg-hard-block-venv/bin/activate
+python3 -m pip install --require-hashes -r requirements-dev.txt
+```
+
+Then load the repository directly:
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
@@ -62,7 +71,7 @@ one automatically.
 
 1. `manifest.json` JSON validity
 2. `node --check` on every file in `src/`
-3. the Node unit tests in `tests/`
+3. the Node unit tests and Python release-tooling tests in `tests/`
 4. the headless-browser fixtures in `tests/*.html`
 
 There is also an optional networked smoke test against a live BGG thread:
@@ -71,7 +80,9 @@ There is also an optional networked smoke test against a live BGG thread:
 python3 scripts/live_smoke.py --chrome /path/to/chrome
 ```
 
-It needs real BGG credentials and is not part of CI.
+Use Chromium or Chrome for Testing; current branded Chrome builds ignore the
+unpacked-extension command-line flag. The test uses a disposable signed-out
+profile and is not part of CI.
 
 ## Adding a test
 
@@ -82,7 +93,8 @@ time BGG ships a frontend change.
 
 ## Style
 
-- No dependencies, in either the extension or the test suite.
+- No runtime dependencies in the shipped extension. Keep contributor tools
+  minimal and hash-locked in `requirements-dev.txt`.
 - `"use strict"` at the top of each IIFE.
 - Comments explain **why**, not what. If a selector or delay looks arbitrary,
   say what BGG behavior forced it.

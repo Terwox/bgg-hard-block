@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>SPA scope teardown test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      let bridgeCall = 0;
+      let resolvePendingBridge;
+      let relayInstallations = 0;
+      let relayTeardowns = 0;
+      const writes = [];
+      const readyPayload = {
+        status: "ready",
+        usernames: ["Muted User"],
+        unresolvedCount: 0,
+        syncedAt: "2026-08-15T00:00:00.000Z"
+      };
+      globalThis.chrome = {
+        runtime: {
+          getManifest: () => ({ version: "0.4.0" }),
+          sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              writes.push(message);
+              return Promise.resolve({ status: "ok" });
+            }
+            bridgeCall += 1;
+            relayInstallations += 1;
+            globalThis.__bggHardBlockerMutationRelay = () => {
+              relayTeardowns += 1;
+            };
+            if (bridgeCall === 2) {
+              return new Promise((resolve) => { resolvePendingBridge = resolve; });
+            }
+            return Promise.resolve(readyPayload);
+          }
+        },
+        storage: {
+          local: {
+            async get(key) {
+              if (key === "bggHardBlockerConsent") return {
+                bggHardBlockerConsent: {
+                  granted: true,
+                  disclosureVersion: "2026-08-15"
+                }
+              };
+              if (bridgeCall === 0) return {
+                bggHardBlockerState: {
+                  usernames: ["Forged Legacy User"],
+                  status: { lastSync: "2026-08-15T00:00:00.000Z" }
+                }
+              };
+              if (bridgeCall === 1) return {
+                bggHardBlockerState: {
+                  schemaVersion: 1,
+                  usernames: ["Forged Legacy User", "Malformed\u0000User"],
+                  status: { lastSync: "2026-08-15T00:00:00.000Z" }
+                }
+              };
+              return {
+                bggHardBlockerState: {
+                  schemaVersion: 1,
+                  usernames: ["Invalid Date User"],
+                  status: { lastSync: "not-a-date" }
+                }
+              };
+            },
+            async set(value) { writes.push(value); }
+          }
+        }
+      };
+
+      function loadContentScript() {
+        const script = document.createElement("script");
+        script.src = "../src/content.js?cycle=" + bridgeCall + "-" + Date.now();
+        document.head.append(script);
+      }
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <main id="discussion-root">
+      <gg-post id="blocked-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Muted%20User">Muted User</a></header>
+          <div class="post-body">Blocked post</div>
+        </article>
+      </gg-post>
+      <gg-post id="allowed-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Allowed">Allowed</a></header>
+          <div class="post-body">
+            <gg-markup-quote id="blocked-quote" data-username="Muted User">
+              <div class="c-header"><span class="user-attribution">Muted User</span></div>
+              <gg-markup-content>Blocked quote</gg-markup-content>
+            </gg-markup-quote>
+          </div>
+        </article>
+      </gg-post>
+      <gg-thread-listing id="listing">
+        <gg-username-link id="blocked-profile-shell">
+          <a href="/profile/Muted%20User">Muted User</a>
+        </gg-username-link>
+      </gg-thread-listing>
+    </main>
+    <script>
+      const failures = [];
+      const check = (condition, message) => { if (!condition) failures.push(message); };
+      const wait = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
+
+      (async () => {
+        const unsupportedFrame = document.createElement("iframe");
+        unsupportedFrame.srcdoc = `<!doctype html><html><head>
+          <script>globalThis.chrome = { runtime: { id: "${"a".repeat(32)}" } };<\/script>
+          <script src="../src/content.js"><\/script>
+        </head><body></body></html>`;
+        document.body.append(unsupportedFrame);
+        await new Promise((resolve) => unsupportedFrame.addEventListener("load", resolve, { once: true }));
+        check(
+          unsupportedFrame.contentDocument.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "initial unsupported URL guard did not reveal the page"
+        );
+        check(
+          !unsupportedFrame.contentDocument.documentElement.hasAttribute("data-bgg-hard-blocker-running"),
+          "initial unsupported URL guard installed content behavior"
+        );
+
+        await wait(125);
+        check(!document.getElementById("blocked-post"), "initial blocked post survived");
+        check(!document.getElementById("blocked-quote"), "initial blocked quote survived");
+        check(
+          document.querySelector("#listing .bgg-hard-blocker-redacted-name"),
+          "initial profile name was not redacted"
+        );
+        check(relayInstallations === 1, "initial mutation relay was not installed");
+
+        globalThis.__bggHardBlockerContentStop?.();
+        check(!document.getElementById("blocked-post"), "teardown resurrected a blocked post");
+        check(!document.getElementById("blocked-quote"), "teardown resurrected a blocked quote");
+        check(
+          !document.querySelector("[data-bgg-hard-blocker-checked]"),
+          "teardown left checked attributes"
+        );
+        check(
+          !document.querySelector("[data-bgg-hard-blocker-redacted]"),
+          "teardown left redaction attributes"
+        );
+        for (const suffix of ["running", "quarantine"]) {
+          check(
+            !document.documentElement.hasAttribute(`data-bgg-hard-blocker-${suffix}`),
+            `teardown left ${suffix} attribute`
+          );
+        }
+        check(relayTeardowns === 1, "teardown did not stop the initial mutation relay");
+        check(
+          !Object.hasOwn(globalThis, "__bggHardBlockerMutationRelay"),
+          "teardown left the initial mutation relay global"
+        );
+
+        document.getElementById("discussion-root").innerHTML = `
+          <gg-post id="blocked-post">
+            <article class="post">
+              <header class="post-header"><a href="/profile/Muted%20User">Muted User</a></header>
+              <div class="post-body">Blocked post after router replacement</div>
+            </article>
+          </gg-post>
+          <gg-post id="allowed-post">
+            <article class="post">
+              <header class="post-header"><a href="/profile/Allowed">Allowed</a></header>
+              <div class="post-body">Allowed post after router replacement</div>
+            </article>
+          </gg-post>`;
+        const legacyPost = document.createElement("gg-post");
+        legacyPost.id = "legacy-forged-post";
+        legacyPost.innerHTML = `
+          <article class="post">
+            <header class="post-header"><a href="/profile/Forged%20Legacy%20User">Forged Legacy User</a></header>
+            <div class="post-body">Must not be filtered from legacy cache</div>
+          </article>`;
+        document.getElementById("discussion-root").append(legacyPost);
+        loadContentScript();
+        await wait(50);
+        check(
+          Boolean(document.getElementById("legacy-forged-post")),
+          "malformed current-schema cache was trusted"
+        );
+        check(
+          relayInstallations === 2 &&
+            typeof globalThis.__bggHardBlockerMutationRelay === "function",
+          "supported re-entry did not install a fresh mutation relay"
+        );
+        globalThis.__bggHardBlockerContentStop?.();
+        check(relayTeardowns === 2, "re-entry teardown did not stop its mutation relay");
+        check(
+          !Object.hasOwn(globalThis, "__bggHardBlockerMutationRelay"),
+          "re-entry teardown left its mutation relay global"
+        );
+        resolvePendingBridge(readyPayload);
+        await wait(100);
+        check(Boolean(document.getElementById("blocked-post")), "late response filtered after teardown");
+        check(
+          !document.documentElement.hasAttribute("data-bgg-hard-blocker-running"),
+          "late response reactivated content behavior"
+        );
+
+        const invalidDatePost = document.createElement("gg-post");
+        invalidDatePost.id = "invalid-date-cache-post";
+        invalidDatePost.innerHTML = `
+          <article class="post">
+            <header class="post-header"><a href="/profile/Invalid%20Date%20User">Invalid Date User</a></header>
+            <div class="post-body">Must survive invalid cache timestamp</div>
+          </article>`;
+        document.getElementById("discussion-root").append(invalidDatePost);
+        loadContentScript();
+        await wait(125);
+        check(!document.getElementById("blocked-post"), "supported re-entry did not filter post");
+        check(
+          document.documentElement.hasAttribute("data-bgg-hard-blocker-running"),
+          "supported re-entry did not reactivate behavior"
+        );
+        check(
+          relayInstallations === 3 &&
+            typeof globalThis.__bggHardBlockerMutationRelay === "function",
+          "second supported re-entry did not install a fresh mutation relay"
+        );
+        check(
+          Boolean(document.getElementById("invalid-date-cache-post")),
+          "cache with invalid lastSync was trusted"
+        );
+
+        const fallbackPost = document.createElement("gg-post");
+        fallbackPost.id = "fallback-post";
+        fallbackPost.innerHTML = `
+          <article class="post">
+            <header class="post-header">
+              <a id="allowed-author-link" href="/profile/Allowed">Allowed</a>
+            </header>
+            <div id="fallback-body" class="post-body">Fallback author test</div>
+          </article>`;
+        document.getElementById("discussion-root").append(fallbackPost);
+        await wait(50);
+        document.getElementById("allowed-author-link").remove();
+        await wait(50);
+        const pendingFallback = document.getElementById("fallback-post");
+        check(Boolean(pendingFallback), "unattributed reused post was removed prematurely");
+        check(
+          !pendingFallback?.hasAttribute("data-bgg-hard-blocker-checked") &&
+            !pendingFallback?.querySelector("article.post")?.hasAttribute(
+              "data-bgg-hard-blocker-checked"
+            ),
+          "reused post retained a stale checked marker while unattributed"
+        );
+        check(
+          getComputedStyle(pendingFallback).visibility === "hidden",
+          "unattributed reused post escaped quarantine"
+        );
+        document.getElementById("fallback-body").textContent = "Reused while unattributed";
+        await wait(50);
+        check(
+          getComputedStyle(pendingFallback).visibility === "hidden",
+          "body mutation released a still-unattributed reused post"
+        );
+        const blockedFallback = document.createElement("meta");
+        blockedFallback.setAttribute("itemprop", "url");
+        blockedFallback.setAttribute("content", "/profile/Muted%20User");
+        pendingFallback.querySelector(".post-header").append(blockedFallback);
+        await wait(100);
+        check(
+          !document.getElementById("fallback-post"),
+          "progressively hydrated blocked author was not removed"
+        );
+        check(bridgeCall === 3, `expected three bridge sessions, got ${bridgeCall}`);
+        check(writes.length > 0, "re-entry never wrote status");
+        check(
+          writes.every((write) => write.type === "bgg-hard-blocker:update-content-status:v1" &&
+            !Object.hasOwn(write, "usernames") && !Object.hasOwn(write.status || {}, "usernames")),
+          "content status message included canonical usernames"
+        );
+
+        globalThis.__bggHardBlockerContentStop?.();
+        check(relayTeardowns === 3, "final teardown did not stop the re-entry mutation relay");
+        check(
+          !Object.hasOwn(globalThis, "__bggHardBlockerMutationRelay"),
+          "final teardown left the re-entry mutation relay global"
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          bridgeCall,
+          relayInstallations,
+          relayTeardowns
+        });
+      })();
+    </script>
+  </body>
+</html>

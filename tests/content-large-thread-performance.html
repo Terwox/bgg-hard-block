@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Large thread content performance benchmark</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      const INITIAL_POST_COUNT = 640;
+      const ROUTE_POST_COUNT = 120;
+      const BLOCKED_EVERY = 8;
+      const filterCalls = [];
+      const writes = [];
+      let blockedSetConstructions = 0;
+
+      globalThis.chrome = {
+        runtime: {
+          getManifest() {
+            return { version: "0.4.0" };
+          },
+          async sendMessage() {
+            return {
+              status: "ready",
+              usernames: ["Muted User"],
+              unresolvedCount: 0,
+              syncedAt: "2026-08-15T00:00:00.000Z"
+            };
+          }
+        },
+        storage: {
+          local: {
+            async get(key) {
+              return key === "bggHardBlockerConsent"
+                ? {
+                    bggHardBlockerConsent: {
+                      granted: true,
+                      disclosureVersion: "2026-08-15"
+                    }
+                  }
+                : {};
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          }
+        }
+      };
+
+      function usedHeap() {
+        return performance.memory?.usedJSHeapSize ?? null;
+      }
+
+      function makePost(index, routeName) {
+        const blocked = index % BLOCKED_EVERY === 0;
+        const username = blocked ? "Muted User" : `Allowed User ${index}`;
+        const post = document.createElement("gg-post");
+        post.id = `${routeName}-post-${index}`;
+        post.innerHTML = `
+          <article class="post">
+            <header class="post-header">
+              <a href="/profile/${encodeURIComponent(username)}">${username}</a>
+              <span class="post-meta">Posted today</span>
+            </header>
+            <div class="post-body">
+              <p>Discussion paragraph ${index} with enough text to resemble a populated thread.</p>
+              <gg-markup-quote data-username="${index % 11 === 0 ? "Muted User" : "Quoted Friend"}">
+                <div class="c-header"><span class="user-attribution">Quoted user wrote:</span></div>
+                <gg-markup-content>Earlier context for reply ${index}.</gg-markup-content>
+              </gg-markup-quote>
+              <p>Allowed reply content after the quotation.</p>
+            </div>
+          </article>`;
+        return post;
+      }
+
+      function buildPosts(count, routeName) {
+        const fragment = document.createDocumentFragment();
+        for (let index = 0; index < count; index += 1) {
+          fragment.append(makePost(index, routeName));
+        }
+        return fragment;
+      }
+    </script>
+  </head>
+  <body data-status="running">
+    <main id="feed">
+      <section id="route-slot" aria-label="Discussion thread"></section>
+    </main>
+    <script>
+      const routeSlot = document.getElementById("route-slot");
+      routeSlot.append(buildPosts(INITIAL_POST_COUNT, "initial"));
+      let heapBeforeContent = null;
+      let contentStartedAt = 0;
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script>
+      const core = globalThis.BggHardBlockerCore;
+      globalThis.BggHardBlockerCore = Object.freeze({
+        ...core,
+        makeBlockedSet(usernames) {
+          blockedSetConstructions += 1;
+          return core.makeBlockedSet(usernames);
+        },
+        filterDom(root, blocked) {
+          const startedAt = performance.now();
+          const result = core.filterDom(root, blocked);
+          filterCalls.push({
+            durationMs: performance.now() - startedAt,
+            root: root === document ? "document" : root.id || root.tagName
+          });
+          return result;
+        }
+      });
+    </script>
+    <script>
+      const snapshots = {};
+
+      function sumDurations(calls) {
+        return calls.reduce((total, call) => total + call.durationMs, 0);
+      }
+
+      function summarizeCalls(calls) {
+        const rootCounts = {};
+        for (const call of calls) {
+          const rootGroup = /^route-post-\d+$/.test(call.root)
+            ? "route-post-*"
+            : call.root;
+          rootCounts[rootGroup] = (rootCounts[rootGroup] || 0) + 1;
+        }
+        return {
+          count: calls.length,
+          durationMs: sumDurations(calls),
+          maxDurationMs: Math.max(0, ...calls.map((call) => call.durationMs)),
+          rootCounts
+        };
+      }
+
+      function waitForReady() {
+        return new Promise((resolve) => {
+          const poll = () => {
+            if (document.documentElement.hasAttribute("data-bgg-hard-blocker-ready")) {
+              resolve();
+            } else {
+              requestAnimationFrame(poll);
+            }
+          };
+          poll();
+        });
+      }
+
+      async function runBenchmark() {
+        await waitForReady();
+        const revealElapsedMs = performance.now() - contentStartedAt;
+        // Allow status writes and any observer work caused by the initial pass
+        // to settle before separating the route-update measurements.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const initialCalls = [...filterCalls];
+        snapshots.initial = {
+          blockedSetConstructions,
+          calls: summarizeCalls(initialCalls),
+          filterDurationMs: sumDurations(initialCalls),
+          heapDeltaBytes:
+            heapBeforeContent === null ? null : usedHeap() - heapBeforeContent,
+          remainingPosts: routeSlot.querySelectorAll("gg-post").length,
+          revealElapsedMs
+        };
+
+        filterCalls.length = 0;
+        const heapBeforeRoute = usedHeap();
+        const routeBuiltAt = performance.now();
+        const nextRoute = buildPosts(ROUTE_POST_COUNT, "route");
+        location.hash = "benchmark-route";
+        routeSlot.replaceChildren(nextRoute);
+
+        const firstAllowed = document.getElementById("route-post-1");
+        const firstBlocked = document.getElementById("route-post-0");
+        snapshots.route = {
+          allowedVisibilityAtInsert: getComputedStyle(firstAllowed).visibility,
+          blockedVisibilityAtInsert: getComputedStyle(firstBlocked).visibility,
+          buildAndInsertMs: performance.now() - routeBuiltAt
+        };
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const routeCalls = [...filterCalls];
+        snapshots.route.calls = summarizeCalls(routeCalls);
+        snapshots.route.filterDurationMs = sumDurations(routeCalls);
+        snapshots.route.fullDocumentSweeps = routeCalls.filter(
+          (call) => call.root === "document"
+        ).length;
+        snapshots.route.heapDeltaBytes =
+          heapBeforeRoute === null ? null : usedHeap() - heapBeforeRoute;
+        snapshots.route.remainingPosts = routeSlot.querySelectorAll("gg-post").length;
+        snapshots.route.allowedChecked = firstAllowed.hasAttribute(
+          "data-bgg-hard-blocker-checked"
+        );
+        snapshots.route.allowedVisibilityAfterFilter = getComputedStyle(
+          firstAllowed
+        ).visibility;
+        snapshots.route.blockedRemoved = !firstBlocked.isConnected;
+        snapshots.route.blockedSetConstructions = blockedSetConstructions;
+
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+        const expectedInitialPosts =
+          INITIAL_POST_COUNT - Math.ceil(INITIAL_POST_COUNT / BLOCKED_EVERY);
+        const expectedRoutePosts =
+          ROUTE_POST_COUNT - Math.ceil(ROUTE_POST_COUNT / BLOCKED_EVERY);
+
+        check(
+          snapshots.initial.revealElapsedMs < 2000,
+          `initial reveal exceeded 2000 ms: ${snapshots.initial.revealElapsedMs.toFixed(1)} ms`
+        );
+        check(
+          snapshots.initial.filterDurationMs < 1500,
+          `initial filtering exceeded 1500 ms: ${snapshots.initial.filterDurationMs.toFixed(1)} ms`
+        );
+        check(
+          initialCalls.length <= 3 &&
+            initialCalls.every((call) => call.root === "document"),
+          `initial filtering used unexpected roots: ${JSON.stringify(initialCalls)}`
+        );
+        check(
+          snapshots.initial.blockedSetConstructions <= 3,
+          `blocked set was repeatedly rebuilt initially: ${snapshots.initial.blockedSetConstructions}`
+        );
+        check(
+          snapshots.initial.remainingPosts === expectedInitialPosts,
+          `initial blocked posts survived: ${snapshots.initial.remainingPosts}/${expectedInitialPosts}`
+        );
+        check(
+          snapshots.route.allowedVisibilityAtInsert === "hidden" &&
+            snapshots.route.blockedVisibilityAtInsert === "hidden",
+          "route replacement bypassed anti-paint quarantine"
+        );
+        check(
+          routeCalls.length >= ROUTE_POST_COUNT &&
+            routeCalls.length <= ROUTE_POST_COUNT + 5 &&
+            routeCalls.every((call) => call.root.startsWith("route-post-")),
+          `route burst escaped its subtree: ${JSON.stringify(routeCalls)}`
+        );
+        check(
+          snapshots.route.fullDocumentSweeps === 0,
+          `route burst triggered ${snapshots.route.fullDocumentSweeps} document sweep(s)`
+        );
+        check(
+          snapshots.route.filterDurationMs < 750,
+          `route filtering exceeded 750 ms: ${snapshots.route.filterDurationMs.toFixed(1)} ms`
+        );
+        check(
+          snapshots.route.blockedSetConstructions ===
+            snapshots.initial.blockedSetConstructions,
+          "mutation filtering reconstructed the blocked set"
+        );
+        check(
+          snapshots.route.remainingPosts === expectedRoutePosts &&
+            snapshots.route.blockedRemoved,
+          `route blocked posts survived: ${snapshots.route.remainingPosts}/${expectedRoutePosts}`
+        );
+        check(
+          snapshots.route.allowedChecked &&
+            snapshots.route.allowedVisibilityAfterFilter === "visible",
+          "allowed route content was not released after filtering"
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, snapshots });
+      }
+
+      window.addEventListener(
+        "DOMContentLoaded",
+        () => {
+          heapBeforeContent = usedHeap();
+          contentStartedAt = performance.now();
+          const contentScript = document.createElement("script");
+          contentScript.src = "../src/content.js";
+          contentScript.addEventListener("load", runBenchmark, { once: true });
+          document.head.append(contentScript);
+        },
+        { once: true }
+      );
+    </script>
+  </body>
+</html>

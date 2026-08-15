@@ -7,10 +7,10 @@
 /**
  * Toolbar popup: a read-only status readout.
  *
- * Everything shown here is read from `chrome.storage.local`, which the content
- * script wrote on the last discussion page. The popup issues no network
- * requests, sends no messages to content scripts, and changes no state — the
- * only interactive element opens the options or onboarding page.
+ * Everything shown here is read from `chrome.storage.local`, written by the
+ * content script or background worker during the last discussion-page sync.
+ * The popup issues no network requests, sends no messages to content scripts,
+ * and changes no state — its only interactive element opens Options or setup.
  *
  * All values are written with `textContent`, never `innerHTML`, so a username
  * from BGG cannot inject markup into extension UI.
@@ -30,7 +30,9 @@
         ? "2026-08-06"
         : /^0\.3\.1[34]$/.test(LOADED_EXTENSION_VERSION)
           ? "2026-08-10"
-          : "2026-08-13";
+          : /^0\.3\.15$/.test(LOADED_EXTENSION_VERSION)
+            ? "2026-08-13"
+            : "2026-08-15";
 
   const STORAGE_KEY = "bggHardBlockerState";
   const OPTIONS_KEY = "bggHardBlockerOptions";
@@ -57,7 +59,7 @@
   const consent = stored?.[CONSENT_KEY];
   const consentGranted =
     consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
-  // Default-on, matching settings-bridge.js and options.js.
+  // Default-on, matching onboarding.js and options.js.
   const linkingEnabled = stored?.[OPTIONS_KEY]?.linkSubscriptionBlocks !== false;
   const subscription = stored?.[SUBSCRIPTION_STATE_KEY];
 
@@ -83,7 +85,7 @@
   }
 
   // Subscription-linking summary. States originate in
-  // reconcileSubscriptionBlocks in src/page-bridge.js.
+  // reconcileSubscriptionBlocks in src/background.js.
   if (!linkingEnabled) {
     // Restates the one-way rule: switching off does not undo past linking.
     elements.subscription.textContent = "Off";
@@ -96,6 +98,10 @@
     elements.subscription.textContent = "Partial";
     elements.subscriptionNote.textContent =
       `${subscription.failedCount || 0} hidden users could not be linked.`;
+  } else if (subscription?.state === "error" && subscription.deferred === true) {
+    elements.subscription.textContent = "Paused";
+    elements.subscriptionNote.textContent =
+      "BGG’s native Hidden Users changed. Linking will retry on the next supported discussion page load.";
   } else if (subscription?.state === "error") {
     elements.subscription.textContent = "Error";
     elements.subscriptionNote.textContent = "Latest linking attempt failed; discussion blocking is still active.";

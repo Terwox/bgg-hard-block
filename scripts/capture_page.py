@@ -11,28 +11,19 @@ import argparse
 import asyncio
 import base64
 import json
-import os
 from pathlib import Path
-import signal
 import subprocess
 import tempfile
-import time
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import websockets
 
-
-def wait_for_debug_port(profile_dir: Path, process: subprocess.Popen[bytes]) -> int:
-    marker = profile_dir / "DevToolsActivePort"
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"Chromium exited early with status {process.returncode}")
-        if marker.exists():
-            return int(marker.read_text(encoding="utf-8").splitlines()[0])
-        time.sleep(0.05)
-    raise TimeoutError("Chromium did not expose a DevTools port")
+from chromium_process import (
+    background_process_kwargs,
+    stop_process_tree,
+    wait_for_debug_port,
+)
 
 
 def open_target(port: int, url: str) -> str:
@@ -100,17 +91,6 @@ async def capture(websocket_url: str, url: str, width: int, height: int) -> byte
         return base64.b64decode(result["data"])
 
 
-def stop_process_group(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    os.killpg(process.pid, signal.SIGTERM)
-    try:
-        process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=3)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--chrome", required=True)
@@ -136,7 +116,7 @@ def main() -> int:
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            **background_process_kwargs(),
         )
         try:
             port = wait_for_debug_port(profile_dir, process)
@@ -150,7 +130,7 @@ def main() -> int:
                 )
             )
         finally:
-            stop_process_group(process)
+            stop_process_tree(process)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(png)

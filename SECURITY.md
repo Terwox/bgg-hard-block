@@ -19,19 +19,21 @@ counts.
 ### In scope
 
 - Anything that causes the captured `GeekAuth` authorization header to leave
-  page memory — written to `chrome.storage`, `localStorage`, the DOM, a log, or
-  any network destination other than `api.geekdo.com`.
+  its short-lived MAIN/background synchronization path — for example, by
+  entering storage, the DOM, a log, a content-script response, or any network
+  destination other than `api.geekdo.com`.
 - Anything that causes the extension to send data to a destination other than
   `boardgamegeek.com` or `api.geekdo.com`.
 - Anything that causes the extension to act before the user has granted consent
-  on the onboarding page.
-- Anything that lets a page other than BGG trigger the extension's privileged
-  behavior — in particular, injection of the MAIN-world bridge on a non-BGG
-  origin, or a crafted BGG page reaching the extension's isolated world.
+  on the onboarding page, or after that consent or the authorized option state
+  changes during synchronization.
+- Anything that lets an unsupported page or stale document trigger privileged
+  behavior — in particular, a MAIN-world injection not bound to the active,
+  top-level, canonical BGG discussion document that requested it.
 - Anything that causes a subscription block to be **removed** at BGG. Linking is
   one-way by design.
 - Anything that causes the extension to follow a pagination link to an origin
-  other than `api.geekdo.com` (see `normalizeApiLink` in `src/page-bridge.js`).
+  other than `api.geekdo.com` (see `normalizePaginationLink` in `src/background.js`).
 
 ### Out of scope
 
@@ -51,15 +53,71 @@ Stated plainly, so you can check the claims against the source:
 
 | Data | Where it lives | Leaves the machine? |
 | --- | --- | --- |
-| `GeekAuth` authorization header | MAIN-world page memory only | Only back to `api.geekdo.com`, which BGG's own frontend already sends it to |
-| Blocked user IDs and usernames | `chrome.storage.local` | No |
-| Profile ID→username cache | BGG-origin `localStorage`, 30-day TTL | No |
-| Consent record and options | `chrome.storage.local` | No |
-| Hidden post/quote counts | `chrome.storage.local` | No |
+| `GeekAuth` authorization header | Ephemeral MAIN-world and background-worker memory | Only back to `api.geekdo.com`, which BGG's own frontend already sends it to |
+| Consent record | `chrome.storage.local`, `bggHardBlockerConsent` | No |
+| Subscription-linking option | `chrome.storage.local`, `bggHardBlockerOptions` | No |
+| Blocked usernames, result status, and counts | `chrome.storage.local`, `bggHardBlockerState` | No |
+| Blocked profile ID→username cache | `chrome.storage.local`, `bggHardBlockerProfileCache`; entries older than 30 days are never reused, and the next successful sync prunes stale/non-current IDs | No |
+| Subscription-linking status | `chrome.storage.local`, `bggHardBlockerSubscriptionState` | No |
 | Reply drafts | Never stored; sanitized in place | No |
 
 There is no developer-controlled server. There is no analytics, telemetry, or
 crash reporting of any kind.
+
+There is no declarative MAIN-world, settings, metadata, or data-bearing
+`CustomEvent` bridge. The isolated content script requests synchronization from
+the background worker, which validates the sender document and current
+authorization state before a document-bound MAIN-world capture. The captured
+value returns privately through `chrome.scripting.executeScript`; it never
+enters the response to content. Header inspection becomes inert after the first
+settled result, and the long-lived mutation-only wrappers retain no credential
+binding. The worker rechecks authorization before network
+work, before every irreversible subscription addition, and before persisting or
+returning public results. The worker owns and generation-orders the canonical
+cached username list; content documents can report only bounded page counters,
+which the worker merges without accepting usernames or synchronization
+provenance. Cached content state carries an extension-owned schema marker;
+unversioned state from releases whose block-list data crossed a
+page-writable bridge is discarded.
+
+One revocation-only `CustomEvent` crosses from MAIN world to an isolated relay.
+Its name is bound to a random nonce for the active document, and its payload is
+empty. The relay can send only the fixed revocation message and nonce; the
+worker accepts it only from the matching active, top-level discussion document.
+This signal can suspend optional subscription linking after a native Hidden
+Users mutation starts. It cannot disclose data or authorize a request.
+
+All extension-originated authenticated requests run in the service worker, not
+the page-controlled realm. They omit cookies, refuse redirects, and allow only:
+
+- `GET https://api.geekdo.com/api/userblock`
+- `GET https://api.geekdo.com/api/user/{id}`
+- `GET https://api.geekdo.com/api/blocks?type=user&singular=1` and validated
+  pagination on that same endpoint
+- `PUT https://api.geekdo.com/api/user/{id}/blocks`
+
+Document relay and credential capture have a worker-owned five-second deadline;
+FIFO waiting and trusted synchronization then share a separate 20-second
+deadline. Each synchronization is limited to 6,000 requests and 16 MiB of
+response data, with a 2 MiB ceiling per response, six concurrent profile reads,
+5,000 Hidden Users identifiers, and 100 subscription pages. Exceeding a bound
+aborts the session without persisting its result.
+
+Page code can withhold or substitute the observed credential, causing a safe
+authentication failure or selecting whatever BGG account that credential
+actually represents. It cannot supply API response data, request destinations,
+methods, identifiers, or bodies to the worker.
+
+### Residual subscription-linking race
+
+Geekdo does not expose a conditional revision token for these operations.
+Immediately before each subscription addition, the worker performs a separate
+`GET /api/userblock` and then an unconditional `PUT /api/user/{id}/blocks`.
+Nonce-bound revocation suspends linking when the wrapper observes a native
+Hidden Users mutation in the same document, but it cannot make those two API
+requests atomic. A native change could occur between the final `GET` and `PUT`.
+This is a residual limitation of the available Geekdo API, not a guarantee of
+atomic race protection.
 
 ## Verifying a release
 

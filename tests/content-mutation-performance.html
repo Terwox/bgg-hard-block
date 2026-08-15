@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Content mutation targeting test</title>
+    <script>
+      globalThis.chrome = {
+        runtime: {
+          async sendMessage() {
+            return {
+              status: "ready",
+              usernames: ["Muted User"],
+              unresolvedCount: 0,
+              syncedAt: "2026-08-15T00:00:00.000Z"
+            };
+          }
+        },
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerConsent: {
+                  granted: true,
+                  disclosureVersion: "2026-08-15"
+                }
+              };
+            },
+            async set() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script>
+      const filterCalls = [];
+      const core = globalThis.BggHardBlockerCore;
+      globalThis.BggHardBlockerCore = Object.freeze({
+        ...core,
+        filterDom(root, blocked) {
+          filterCalls.push(root === document ? "document" : root.id || root.tagName);
+          return core.filterDom(root, blocked);
+        }
+      });
+    </script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <div id="feed"></div>
+    <div id="irrelevant"></div>
+    <script>
+      const snapshots = {};
+
+      setTimeout(() => {
+        filterCalls.length = 0;
+        const batch = document.createElement("section");
+        batch.id = "inserted-batch";
+        batch.innerHTML = `
+          <gg-post id="targeted-post">
+            <article class="post">
+              <header class="post-header"><a href="/profile/Allowed">Allowed</a></header>
+              <div class="post-body">
+                <gg-markup-quote data-username="Allowed Quote">
+                  <gg-markup-content>Allowed quotation</gg-markup-content>
+                </gg-markup-quote>
+              </div>
+            </article>
+          </gg-post>`;
+        document.getElementById("feed").append(batch);
+        batch.querySelector("a").setAttribute("itemprop", "url");
+      }, 650);
+
+      setTimeout(() => {
+        snapshots.insertCalls = [...filterCalls];
+        filterCalls.length = 0;
+        const irrelevant = document.getElementById("irrelevant");
+        for (let index = 0; index < 25; index += 1) {
+          irrelevant.className = `render-${index}`;
+        }
+        document.querySelector("#targeted-post .post-body").append(" hydrated");
+      }, 800);
+
+      setTimeout(() => {
+        snapshots.classifiedCalls = [...filterCalls];
+        filterCalls.length = 0;
+        const quote = document.createElement("gg-markup-quote");
+        quote.id = "incomplete-quote";
+        quote.innerHTML = `
+          <div class="c-header">
+            <span class="user-attribution">Loading attribution</span>
+          </div>
+          <gg-markup-content>Loading</gg-markup-content>`;
+        document.getElementById("feed").append(quote);
+      }, 1000);
+
+      setTimeout(() => {
+        snapshots.uncertainCalls = [...filterCalls];
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(
+          snapshots.insertCalls.length === 1 && snapshots.insertCalls[0] === "inserted-batch",
+          `overlapping inserted roots were not deduplicated: ${JSON.stringify(snapshots.insertCalls)}`
+        );
+        check(
+          !snapshots.insertCalls.includes("document"),
+          "classified insertion scheduled a full-document sweep"
+        );
+        check(
+          snapshots.classifiedCalls.length === 1 &&
+            snapshots.classifiedCalls[0] === "ARTICLE",
+          `irrelevant/classified mutations escaped targeted filtering: ${JSON.stringify(snapshots.classifiedCalls)}`
+        );
+        check(
+          snapshots.uncertainCalls.includes("incomplete-quote") &&
+            snapshots.uncertainCalls.includes("document"),
+          `uncertain content did not retain the full-sweep fallback: ${JSON.stringify(snapshots.uncertainCalls)}`
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, snapshots });
+      }, 1200);
+    </script>
+  </body>
+</html>

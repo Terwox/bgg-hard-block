@@ -24,7 +24,7 @@
  * still computed, so images and fonts load normally and revealing the page does
  * not cause a reflow or a visible jump.
  */
-html:not([data-bgg-hard-blocker-ready]) body {
+html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready]) body {
   visibility: hidden !important;
 }
 
@@ -36,16 +36,17 @@ html:not([data-bgg-hard-blocker-ready]) body {
  * running, this rule does not apply and the script's own reveal logic — which
  * has its own shorter deadline — is in charge.
  *
- * Implemented as a zero-duration animation with a 2s delay and `forwards`,
- * because CSS has no other way to change a property after a delay without
- * JavaScript. That is exactly the point: this must work when JavaScript is
- * broken, disabled, or blocked from injecting.
+ * Implemented as a zero-duration animation with a 2s delay and `both` fill.
+ * Before the delay, the backwards-filled first keyframe hides the body. After
+ * the delay, the forwards-filled last keyframe reveals it. This separate rule
+ * is essential: an animation cannot override the `!important` running-script
+ * hold above.
  *
  * Consequence worth being honest about: in that failure mode the user briefly
  * sees an unfiltered page. A permanently blank BoardGameGeek is judged worse.
  */
 html:not([data-bgg-hard-blocker-ready]):not([data-bgg-hard-blocker-running]) body {
-  animation: bgg-hard-blocker-failsafe 0s linear 2s forwards;
+  animation: bgg-hard-blocker-failsafe 0s linear 2s both;
 }
 
 /*
@@ -129,6 +130,10 @@ html[data-bgg-hard-blocker-running]
 }
 
 @keyframes bgg-hard-blocker-failsafe {
+  from {
+    visibility: hidden;
+  }
+
   to {
     visibility: visible;
   }

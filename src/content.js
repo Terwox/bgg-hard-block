@@ -27,18 +27,40 @@
  * un-hides the page even if this script never runs at all.
  *
  * Reveal happens when the DOM is ready **and** one of:
- *   - a live block list arrived from the MAIN-world bridge (best case)
+ *   - a live block list arrived from the background synchronization (best case)
  *   - the cached block list settled and the bridge reported an error
  *   - `POST_LOAD_MAX_HOLD_MS` elapsed after `DOMContentLoaded`
  *
  * ## Privacy note
  *
- * This script never sees the `GeekAuth` header. It receives only the published
- * block list — user IDs and public usernames — through a `<meta>` element. See
- * the header of `src/page-bridge.js` for the world boundary.
+ * This script never sees the `GeekAuth` header or BGG user IDs. It accepts only
+ * the public usernames and status returned through extension messaging after
+ * the background worker validates BGG's API response. No page-writable data
+ * channel participates in filtering or persistence. See `src/background.js`
+ * for that trust boundary.
  */
 (async function runBggHardBlocker() {
   "use strict";
+
+  function isDiscussionUrl(urlText) {
+    try {
+      const url = new URL(urlText);
+      return url.origin === "https://boardgamegeek.com" && !url.username && !url.password && [
+        /^\/forum\//, /^\/thread\//, /^\/geeklist\//, /^\/image\//, /^\/video\//,
+        /^\/filepage\//, /^\/blog\/[^/]+\/blogpost\//
+      ].some((pattern) => pattern.test(url.pathname));
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  // Programmatic injection can finish after an SPA navigation has already
+  // left discussion scope. Keep this check independent of the background's
+  // route decision so that race never installs page behavior.
+  if (globalThis.chrome?.runtime?.id && !isDiscussionUrl(location.href)) {
+    document.documentElement?.setAttribute("data-bgg-hard-blocker-ready", "");
+    return;
+  }
 
   // Guard against double injection (declarative cold load + programmatic
   // injection after an in-page route change).
@@ -55,8 +77,8 @@
   // disclosure honoured here is keyed to the manifest version Chrome actually
   // loaded. Bumping this string forces every user back through the consent
   // screen, so it changes only when the disclosure text itself changes — not on
-  // ordinary releases. The same ladder appears in background.js,
-  // settings-bridge.js, popup.js, options.js, and onboarding.js.
+  // ordinary releases. The same ladder appears in background.js, popup.js,
+  // options.js, and onboarding.js.
   const LOADED_EXTENSION_VERSION = chrome.runtime?.getManifest?.().version || "";
   const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION)
     ? "2026-08-04"
@@ -66,11 +88,15 @@
         ? "2026-08-06"
         : /^0\.3\.1[34]$/.test(LOADED_EXTENSION_VERSION)
           ? "2026-08-10"
-          : "2026-08-13";
+          : /^0\.3\.15$/.test(LOADED_EXTENSION_VERSION)
+            ? "2026-08-13"
+            : "2026-08-15";
 
-  const DATA_ELEMENT_ID = "bgg-hard-blocker-data";
-  const DATA_EVENT = "bgg-hard-blocker:blocklist";
+  const BRIDGE_MESSAGE_TYPE = "bgg-hard-blocker:initialize-bridge:v1";
+  const STATUS_MESSAGE_TYPE = "bgg-hard-blocker:update-content-status:v1";
   const STORAGE_KEY = "bggHardBlockerState";
+  const STATE_SCHEMA_VERSION = 1;
+  const MAX_BLOCKED_USERS = 5000;
   /** Set on <html> to release the CSS hide. */
   const READY_ATTRIBUTE = "data-bgg-hard-blocker-ready";
   /** Set on <html> purely so tests can assert the script attached. */
@@ -103,8 +129,8 @@
   // Long enough for a typical authenticated round trip, short enough that a
   // failed sync is not perceived as a broken site.
   const POST_LOAD_MAX_HOLD_MS = 500;
-  // Backstop for mutation shapes the targeted root collector does not capture.
-  // Local filtering still runs immediately; this coalesces a render burst into
+  // Backstop for mutations that leave content not yet classifiable. Local
+  // filtering still runs immediately; uncertain render bursts coalesce into
   // one whole-document verification pass.
   const FULL_SWEEP_DEBOUNCE_MS = 75;
 
@@ -112,6 +138,55 @@
     return;
   }
   globalThis[INSTALLATION_KEY] = true;
+  document.documentElement.removeAttribute(READY_ATTRIBUTE);
+
+  let active = true;
+  let observer = null;
+  let domContentLoadedHandler = null;
+  let revealDeadlineTimer = 0;
+  let statusWriteTimer = 0;
+  let fullSweepTimer = 0;
+  const filterRemovedNodes = new WeakSet();
+
+  function ensureActiveScope() {
+    if (active && globalThis.chrome?.runtime?.id && !isDiscussionUrl(location.href)) {
+      stopContentScript();
+    }
+    return active;
+  }
+
+  function stopContentScript() {
+    if (!active) return;
+    active = false;
+    observer?.disconnect();
+    observer = null;
+    document.removeEventListener("click", quoteClickHandler, true);
+    if (domContentLoadedHandler) {
+      document.removeEventListener("DOMContentLoaded", domContentLoadedHandler);
+    }
+    window.clearTimeout(revealDeadlineTimer);
+    window.clearTimeout(statusWriteTimer);
+    window.clearTimeout(fullSweepTimer);
+
+    document.querySelectorAll(`[${CHECKED_ATTRIBUTE}]`)
+      .forEach((element) => element.removeAttribute(CHECKED_ATTRIBUTE));
+    document.querySelectorAll("[data-bgg-hard-blocker-redacted]")
+      .forEach((element) => element.removeAttribute("data-bgg-hard-blocker-redacted"));
+    for (const attribute of [RUNNING_ATTRIBUTE, QUARANTINE_ATTRIBUTE]) {
+      document.documentElement.removeAttribute(attribute);
+    }
+    // Manifest-declared CSS cannot reliably be removed with scripting.removeCSS.
+    // Leave the harmless reveal marker in place so that stylesheet cannot hide
+    // an unsupported SPA route; a supported re-entry clears it before filtering.
+    document.documentElement.setAttribute(READY_ATTRIBUTE, "");
+    const stopMutationRelay = globalThis.__bggHardBlockerMutationRelay;
+    if (typeof stopMutationRelay === "function") stopMutationRelay();
+    delete globalThis.__bggHardBlockerMutationRelay;
+    delete globalThis[INSTALLATION_KEY];
+    delete globalThis.__bggHardBlockerContentStop;
+  }
+
+  globalThis.__bggHardBlockerContentStop = stopContentScript;
 
   // ---------------------------------------------------------------------------
   // Consent gate. Nothing below this block runs without a current consent
@@ -120,33 +195,46 @@
   // ---------------------------------------------------------------------------
   try {
     const storedConsent = await chrome.storage.local.get(CONSENT_KEY);
+    if (!active || (globalThis.chrome?.runtime?.id && !isDiscussionUrl(location.href))) {
+      stopContentScript();
+      return;
+    }
     const consent = storedConsent?.[CONSENT_KEY];
     if (consent?.granted !== true || consent?.disclosureVersion !== DISCLOSURE_VERSION) {
       document.documentElement.setAttribute(READY_ATTRIBUTE, "");
       return;
     }
   } catch (_error) {
+    if (!active) return;
     document.documentElement.setAttribute(READY_ATTRIBUTE, "");
     return;
   }
 
-  let blockedUsernames = new Set();
+  let blockedUsernames = core.makeBlockedSet([]);
   let hasBlockList = false;
-  /** Gate for reveal: set once a block list is trustworthy enough to show the page. */
-  let allowReveal = false;
-  /** Whether the cached-blocklist read has finished, successfully or not. */
-  let cacheSettled = false;
+  let blockListRevision = 0;
+  let documentFilteredRevision = -1;
+  /** Explicit startup inputs keep reveal decisions independent of status text. */
+  let bridgeState = "pending";
+  let cacheState = globalThis.chrome?.storage?.local?.get
+    ? "pending"
+    : "unavailable";
+  let revealAuthorized = false;
   let domReady = document.readyState !== "loading";
   let hiddenPosts = 0;
   let hiddenQuotes = 0;
   let redactedProfileNames = 0;
-  let revealDeadlineTimer = 0;
-  let statusWriteTimer = 0;
-  let fullSweepTimer = 0;
   /** Provenance of the current list; surfaced verbatim in the popup. */
   let source = "waiting";
   let lastSync = null;
   let unresolved = 0;
+
+  const channelBytes = new Uint8Array(16);
+  crypto.getRandomValues(channelBytes);
+  const channelNonce = Array.from(
+    channelBytes,
+    (value) => value.toString(16).padStart(2, "0")
+  ).join("");
 
   /** Collect matching descendants, including an element root itself. */
   function collectElements(root, selector) {
@@ -175,7 +263,7 @@
    * instead of being mistaken for safe. The next relevant mutation rechecks it.
    */
   function releaseInspectedContent(root) {
-    if (!hasBlockList) {
+    if (!active || !hasBlockList) {
       return;
     }
 
@@ -219,35 +307,89 @@
     }
   }
 
+  /** Discard decisions made from attribution that a mutation may have changed. */
+  function invalidateInspectedContent(root) {
+    const posts = new Set(collectElements(root, POST_SELECTOR).map(canonicalPost));
+    for (const post of posts) {
+      post.removeAttribute(CHECKED_ATTRIBUTE);
+      const article = post.matches("article.post")
+        ? post
+        : post.querySelector(":scope > article.post");
+      article?.removeAttribute(CHECKED_ATTRIBUTE);
+    }
+    for (const quote of collectElements(root, QUOTE_SELECTOR)) {
+      quote.removeAttribute(CHECKED_ATTRIBUTE);
+    }
+    for (const link of collectElements(root, REDACTABLE_PROFILE_LINK_SELECTOR)) {
+      link.removeAttribute(CHECKED_ATTRIBUTE);
+    }
+  }
+
+  function filterCandidates(root) {
+    return new Set([
+      ...collectElements(root, POST_SELECTOR).map(canonicalPost),
+      ...collectElements(root, QUOTE_SELECTOR),
+      ...collectElements(root, REDACTABLE_PROFILE_LINK_SELECTOR).map((link) =>
+        link.closest("gg-avatar-popup-trigger, gg-username-link") || link
+      )
+    ]);
+  }
+
   /** Run the core filter over a subtree and accumulate counts. */
   function filter(root = document) {
+    if (!ensureActiveScope()) return;
+    // Checked markers are cached allow decisions. Clear them before consulting
+    // the current DOM so author removal or progressive hydration immediately
+    // returns the affected surface to CSS quarantine until reclassification.
+    // CHECKED_ATTRIBUTE is deliberately absent from the observer's attribute
+    // filter, so these internal marker updates cannot create observer loops.
+    invalidateInspectedContent(root);
+    const candidates = filterCandidates(root);
     const result = core.filterDom(root, blockedUsernames);
+    for (const node of candidates) {
+      if (!node.isConnected) filterRemovedNodes.add(node);
+    }
     hiddenPosts += result.posts;
     hiddenQuotes += result.quotes;
     redactedProfileNames += result.profileNames;
     releaseInspectedContent(root);
+    if (root === document) {
+      documentFilteredRevision = blockListRevision;
+    }
 
     if (result.posts || result.quotes || result.profileNames) {
       scheduleStatusWrite();
     }
   }
 
-  /**
-   * Filter once more, then release the CSS hide.
-   *
-   * The final `filter(document)` before revealing is the point of the whole
-   * hold: it guarantees the first frame the user sees is already clean.
-   */
+  /** Release the CSS hide after the current block list has been applied. */
   function reveal() {
-    filter(document);
+    if (!ensureActiveScope()) return;
     document.documentElement.setAttribute(READY_ATTRIBUTE, "");
     scheduleStatusWrite();
   }
 
   function revealIfReady() {
-    if (domReady && allowReveal) {
+    if (!ensureActiveScope()) return;
+    const currentListApplied =
+      !hasBlockList || documentFilteredRevision === blockListRevision;
+    if (
+      domReady &&
+      revealAuthorized &&
+      currentListApplied &&
+      !document.documentElement.hasAttribute(READY_ATTRIBUTE)
+    ) {
       reveal();
     }
+  }
+
+  /** Recompute the reveal gate whenever cache or bridge state settles. */
+  function updateRevealAuthorization() {
+    if (!ensureActiveScope()) return;
+    revealAuthorized ||=
+      bridgeState === "ready" ||
+      (bridgeState === "error" && cacheState !== "pending");
+    revealIfReady();
   }
 
   /**
@@ -262,83 +404,78 @@
     }
 
     revealDeadlineTimer = window.setTimeout(() => {
+      if (!active) return;
       if (!document.documentElement.hasAttribute(READY_ATTRIBUTE)) {
         source = hasBlockList ? source : "timeout";
-        allowReveal = true;
+        revealAuthorized = true;
         reveal();
       }
     }, POST_LOAD_MAX_HOLD_MS);
   }
 
-  /** Snapshot for the popup. Contains no BGG content and no credentials. */
-  function currentStatus() {
+  /** Tab-local filtering counters. Contains no BGG content, canonical state, or credentials. */
+  function currentPageCounters() {
     return {
-      blockedCount: blockedUsernames.size,
       hiddenPosts,
       hiddenQuotes,
       redactedProfileNames,
-      lastSync,
-      pageUrl: location.href,
-      source,
-      unresolved,
       updatedAt: new Date().toISOString()
     };
   }
 
-  /**
-   * Persist the block list and counters.
-   *
-   * This is the complete set of what the extension stores. Auditors comparing
-   * against the privacy disclosure should find nothing beyond `usernames` and
-   * the status object above — no post bodies, no thread contents, no draft text.
-   */
+  /** Send tab-local counters to the background-owned canonical state record. */
   function writeStatus() {
     statusWriteTimer = 0;
-    if (globalThis.chrome?.storage?.local?.set) {
-      chrome.storage.local.set({
-        [STORAGE_KEY]: {
-          usernames: [...blockedUsernames],
-          status: currentStatus()
-        }
-      });
+    if (ensureActiveScope() && hasBlockList &&
+        typeof globalThis.chrome?.runtime?.sendMessage === "function") {
+      chrome.runtime.sendMessage({
+        type: STATUS_MESSAGE_TYPE,
+        channelNonce,
+        status: currentPageCounters()
+      }).catch(() => {});
     }
   }
 
   /** Coalesce writes: a busy mutation burst otherwise hammers storage. */
   function scheduleStatusWrite() {
-    if (statusWriteTimer) {
+    if (!ensureActiveScope() || !hasBlockList || statusWriteTimer) {
       return;
     }
     statusWriteTimer = window.setTimeout(writeStatus, 50);
   }
 
   /**
-   * Adopt a block list from either the cache or the live bridge.
+   * Adopt a block list from extension storage or the private background result.
    *
    * Only a `"live"` list sets `allowReveal` on its own. A cached list filters
    * immediately but does not by itself end the hold, because a stale cache could
    * be missing a recently blocked user — that case is covered by the deadline
    * timer instead.
    *
-   * @param {{usernames: string[], syncedAt?: string, unresolved?: unknown[]}} payload
+   * @param {{usernames: string[], syncedAt?: string, unresolvedCount?: number,
+   *   unresolved?: unknown[]}} payload
    * @param {"cache"|"live"} nextSource
    */
   function applyBlockList(payload, nextSource) {
-    if (!payload || !Array.isArray(payload.usernames)) {
+    if (!ensureActiveScope() || !payload || !Array.isArray(payload.usernames)) {
       return false;
     }
 
     blockedUsernames = core.makeBlockedSet(payload.usernames);
     hasBlockList = true;
+    blockListRevision += 1;
     source = nextSource;
-    allowReveal ||= nextSource === "live";
     lastSync = payload.syncedAt || lastSync;
-    unresolved = Array.isArray(payload.unresolved) ? payload.unresolved.length : 0;
+    unresolved = Number.isInteger(payload.unresolvedCount)
+      ? payload.unresolvedCount
+      : Array.isArray(payload.unresolved)
+        ? payload.unresolved.length
+        : 0;
     filter(document);
     // The filter above marks all currently inspectable allowed items before
     // enabling CSS quarantine, so a late live sync cannot blank a visible page.
     document.documentElement.setAttribute(QUARANTINE_ATTRIBUTE, "");
-    revealIfReady();
+    updateRevealAuthorization();
     scheduleStatusWrite();
     return true;
   }
@@ -374,6 +511,7 @@
    * and never stored.
    */
   function sanitizeQuoteEditors() {
+    if (!ensureActiveScope()) return;
     for (const textarea of document.querySelectorAll(QUOTE_EDITOR_SELECTOR)) {
       const sanitized = core.sanitizeBlockedQuotes(textarea.value, blockedUsernames);
       if (sanitized !== textarea.value) {
@@ -401,54 +539,73 @@
 
   // Capture phase, so this runs before BGG's own click handler and the timers
   // below are already scheduled by the time BGG fills the editor.
-  document.addEventListener(
-    "click",
-    (event) => {
-      if (!isPostQuoteButton(event.target)) {
-        return;
-      }
-
-      for (const delay of QUOTE_SANITIZE_DELAYS_MS) {
-        window.setTimeout(sanitizeQuoteEditors, delay);
-      }
-    },
-    true
-  );
-
-  /** Read the block list published by the MAIN-world bridge. */
-  function readBridgePayload() {
-    const element = document.getElementById(DATA_ELEMENT_ID);
-    if (!element) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(element.getAttribute("content") || "null");
-    } catch (_error) {
-      return null;
+  function quoteClickHandler(event) {
+    if (!ensureActiveScope() || !isPostQuoteButton(event.target)) return;
+    for (const delay of QUOTE_SANITIZE_DELAYS_MS) {
+      window.setTimeout(sanitizeQuoteEditors, delay);
     }
   }
 
-  /**
-   * Handle a bridge publication.
-   *
-   * On error, reveal only once the cache read has settled — otherwise a fast
-   * sync failure would show an unfiltered page while a perfectly good cached
-   * list was still a millisecond away.
-   */
-  function acceptBridgePayload() {
-    const payload = readBridgePayload();
-    if (payload?.status === "ready") {
-      applyBlockList(payload, "live");
-    } else if (payload?.status === "error") {
-      source = hasBlockList ? source : "sync-error";
-      allowReveal = cacheSettled;
-      revealIfReady();
-      scheduleStatusWrite();
+  document.addEventListener("click", quoteClickHandler, true);
+
+  function sanitizeUsernames(value) {
+    if (!Array.isArray(value) || value.length > MAX_BLOCKED_USERS) return null;
+    const usernames = [];
+    for (const rawUsername of value) {
+      if (
+        typeof rawUsername !== "string" ||
+        !rawUsername.trim() ||
+        rawUsername.length > 128 ||
+        /[\u0000-\u001f\u007f]/.test(rawUsername)
+      ) {
+        return null;
+      }
+      usernames.push(rawUsername.trim());
     }
+    return usernames;
   }
 
-  document.addEventListener(DATA_EVENT, acceptBridgePayload);
+  function sanitizeBlockListPayload(payload) {
+    const usernames = sanitizeUsernames(payload?.usernames);
+    if (
+      payload?.status !== "ready" ||
+      !usernames ||
+      !Number.isInteger(payload.unresolvedCount) ||
+      payload.unresolvedCount < 0 ||
+      payload.unresolvedCount > MAX_BLOCKED_USERS ||
+      typeof payload.syncedAt !== "string" ||
+      !Number.isFinite(Date.parse(payload.syncedAt))
+    ) {
+      return null;
+    }
+
+    return {
+      status: "ready",
+      usernames,
+      unresolvedCount: payload.unresolvedCount,
+      syncedAt: payload.syncedAt
+    };
+  }
+
+  function acceptBridgeError() {
+    if (!ensureActiveScope()) return;
+    bridgeState = "error";
+    source = hasBlockList ? source : "sync-error";
+    updateRevealAuthorization();
+    scheduleStatusWrite();
+  }
+
+  function acceptPrivateBridgePayload(rawPayload) {
+    if (!ensureActiveScope()) return;
+    const payload = sanitizeBlockListPayload(rawPayload);
+    if (!payload) {
+      acceptBridgeError();
+      return;
+    }
+
+    bridgeState = "ready";
+    applyBlockList(payload, "live");
+  }
 
   /**
    * Reduce a mutated node to the smallest subtree worth re-filtering.
@@ -457,7 +614,7 @@
    * long thread. Text-node mutations resolve to their parent element, because a
    * quote's attribution often arrives as a text change inside existing markup.
    */
-  function collectMutationRoot(node, roots) {
+  function collectMutationRoot(node, roots, includeDescendants) {
     const element =
       node?.nodeType === Node.ELEMENT_NODE
         ? node
@@ -469,12 +626,33 @@
       return;
     }
 
-    const owner = element.closest(FILTERABLE_SELECTOR);
-    if (owner) {
-      roots.add(owner);
-    } else if (element.querySelector(FILTERABLE_SELECTOR)) {
-      roots.add(element);
+    const root = element.closest(FILTERABLE_SELECTOR) ||
+      (includeDescendants && element.querySelector(FILTERABLE_SELECTOR) ? element : null);
+    if (!root) {
+      return;
     }
+
+    // Keep only the broadest necessary roots. Mutation batches commonly
+    // contain both an inserted post and several descendants hydrated inside it.
+    for (const existing of roots) {
+      if (existing === root || existing.contains(root)) {
+        return;
+      }
+      if (root.contains(existing)) {
+        roots.delete(existing);
+      }
+    }
+    roots.add(root);
+  }
+
+  /** Whether a filtered subtree still contains content awaiting attribution. */
+  function hasUnclassifiedContent(root) {
+    return collectElements(root, FILTERABLE_SELECTOR).some((element) => {
+      const candidate = element.matches(POST_SELECTOR)
+        ? canonicalPost(element)
+        : element;
+      return candidate.isConnected && !candidate.hasAttribute(CHECKED_ATTRIBUTE);
+    });
   }
 
   /** Verify the full page once an Angular render burst settles. */
@@ -486,15 +664,27 @@
     }, FULL_SWEEP_DEBOUNCE_MS);
   }
 
-  const observer = new MutationObserver((records) => {
+  observer = new MutationObserver((records) => {
+    if (!ensureActiveScope()) return;
     // Deduplicate first: one Angular render produces many records pointing at
     // the same post.
     const roots = new Set();
 
     for (const record of records) {
-      collectMutationRoot(record.target, roots);
+      // For child insertions, the added nodes are the narrowest useful roots.
+      // Including their parent would turn one lazy-loaded post into a rescan of
+      // the entire thread feed. Attribute/character-data records have no added
+      // subtree, so their target remains the correct starting point.
+      if (record.type !== "childList") {
+        collectMutationRoot(record.target, roots, false);
+      } else if (record.removedNodes.length && !record.addedNodes.length) {
+        const removedByFilter = [...record.removedNodes]
+          .every((node) => filterRemovedNodes.has(node));
+        for (const node of record.removedNodes) filterRemovedNodes.delete(node);
+        if (!removedByFilter) collectMutationRoot(record.target, roots, false);
+      }
       for (const node of record.addedNodes) {
-        collectMutationRoot(node, roots);
+        collectMutationRoot(node, roots, true);
       }
     }
 
@@ -504,7 +694,12 @@
       }
     }
 
-    scheduleFullSweep();
+    // Most mutations are either unrelated to filterable content or completely
+    // classified by the targeted passes above. Reserve the expensive fallback
+    // for incomplete markup whose author may arrive in a later render step.
+    if ([...roots].some((root) => root.isConnected && hasUnclassifiedContent(root))) {
+      scheduleFullSweep();
+    }
   });
 
   // Attribute filtering is narrow on purpose. These are the attributes that
@@ -535,13 +730,18 @@
     chrome.storage.local
       .get(STORAGE_KEY)
       .then((stored) => {
+        if (!active) return;
         const cached = stored?.[STORAGE_KEY];
-        // Skip if a live list already arrived — never downgrade fresh to stale.
-        if (!hasBlockList && Array.isArray(cached?.usernames)) {
+        const cachedUsernames = sanitizeUsernames(cached?.usernames);
+        const cachedLastSync = cached?.status?.lastSync;
+        const validLastSync = cachedLastSync === undefined ||
+          (typeof cachedLastSync === "string" && Number.isFinite(Date.parse(cachedLastSync)));
+        if (!hasBlockList && cached?.schemaVersion === STATE_SCHEMA_VERSION &&
+            cachedUsernames && validLastSync) {
           applyBlockList(
             {
-              usernames: cached.usernames,
-              syncedAt: cached.status?.lastSync,
+              usernames: cachedUsernames,
+              syncedAt: cachedLastSync,
               unresolved: []
             },
             "cache"
@@ -549,39 +749,49 @@
         }
       })
       .catch(() => {
+        if (!active) return;
         source = "storage-error";
+        cacheState = "error";
       })
       .finally(() => {
-        cacheSettled = true;
-        // A sync error that arrived before the cache settled deferred its
-        // reveal to here.
-        if (source === "sync-error") {
-          allowReveal = true;
+        if (!active) return;
+        if (cacheState === "pending") {
+          cacheState = "ready";
         }
-        revealIfReady();
+        updateRevealAuthorization();
       });
   } else {
-    cacheSettled = true;
+    updateRevealAuthorization();
   }
 
-  // The bridge may have published before this script attached, so read once
-  // directly instead of relying solely on the event.
-  acceptBridgePayload();
+  if (typeof globalThis.chrome?.runtime?.sendMessage === "function") {
+    chrome.runtime
+      .sendMessage({ type: BRIDGE_MESSAGE_TYPE, channelNonce })
+      .then((payload) => {
+        if (!active) return;
+        if (payload?.status === "ready") {
+          acceptPrivateBridgePayload(payload);
+        } else {
+          acceptBridgeError();
+        }
+      })
+      .catch(acceptBridgeError);
+  }
 
   if (!domReady) {
-    document.addEventListener(
-      "DOMContentLoaded",
-      () => {
-        domReady = true;
-        filter(document);
-        revealIfReady();
-        scheduleRevealDeadline();
-      },
-      { once: true }
-    );
+    domContentLoadedHandler = () => {
+      if (!active) return;
+      domReady = true;
+      filter(document);
+      updateRevealAuthorization();
+      scheduleRevealDeadline();
+    };
+    document.addEventListener("DOMContentLoaded", domContentLoadedHandler, { once: true });
   } else {
-    filter(document);
-    revealIfReady();
+    if (documentFilteredRevision !== blockListRevision) {
+      filter(document);
+    }
+    updateRevealAuthorization();
     scheduleRevealDeadline();
   }
 

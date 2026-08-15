@@ -51,6 +51,7 @@
     'gg-reactions-list-popover gg-thumbs-list a[href*="/profile/"]'
   ].join(", ");
   const REDACTED_PROFILE_ATTRIBUTE = "data-bgg-hard-blocker-redacted";
+  const BGG_ORIGIN = "https://boardgamegeek.com";
 
   // Matches one BBCode quote token: [q], [q=name], [q="name"], [q='name'], [/q].
   // Groups 2/3/4 are the double-quoted, single-quoted, and bare username forms.
@@ -95,8 +96,26 @@
       return "";
     }
 
-    const match = href.match(/\/profile\/([^?#/]+)/i);
-    return match ? normalizeUsername(match[1]) : "";
+    try {
+      const url = new URL(href, BGG_ORIGIN);
+      if (
+        url.origin !== BGG_ORIGIN ||
+        url.username ||
+        url.password
+      ) {
+        return "";
+      }
+
+      const match = url.pathname.match(/^\/profile\/([^/]+)\/?$/i);
+      if (!match) {
+        return "";
+      }
+
+      const username = normalizeUsername(match[1]);
+      return /[\\/\u0000-\u001f\u007f]/.test(username) ? "" : username;
+    } catch (_error) {
+      return "";
+    }
   }
 
   /**
@@ -344,13 +363,32 @@
       });
   }
 
+  /**
+   * Reuse sets produced by `makeBlockedSet`; normalize arbitrary iterables once.
+   *
+   * Content-runtime filtering calls this module many times with the same set.
+   * Marking our own sets avoids rebuilding them on every DOM mutation while
+   * preserving normalization for arrays and caller-created sets.
+   */
+  const normalizedBlockedSets = new WeakSet();
+
   /** Build a normalised, empty-free Set from any iterable of usernames. */
   function makeBlockedSet(usernames) {
-    return new Set(
+    const blocked = new Set(
       Array.from(usernames || [])
         .map(normalizeUsername)
         .filter(Boolean)
     );
+    normalizedBlockedSets.add(blocked);
+    return blocked;
+  }
+
+  function normalizedBlockedSet(usernames) {
+    if (usernames instanceof Set && normalizedBlockedSets.has(usernames)) {
+      return usernames;
+    }
+
+    return makeBlockedSet(usernames);
   }
 
   /**
@@ -368,7 +406,7 @@
    * or username-link wrapper after the identifying attributes are gone.
    */
   function redactBlockedProfileNames(root, blockedUsernames) {
-    const blocked = makeBlockedSet(blockedUsernames);
+    const blocked = normalizedBlockedSet(blockedUsernames);
     let redacted = 0;
 
     for (const link of collectElements(root, REDACTABLE_PROFILE_LINK_SELECTOR)) {
@@ -428,7 +466,7 @@
       return typeof value === "string" ? value : "";
     }
 
-    const blocked = makeBlockedSet(blockedUsernames);
+    const blocked = normalizedBlockedSet(blockedUsernames);
     if (!blocked.size) {
       return value;
     }
@@ -496,7 +534,7 @@
    *   posts/quotes were removed and retained-surface names were redacted.
    */
   function filterDom(root, blockedUsernames) {
-    const blocked = makeBlockedSet(blockedUsernames);
+    const blocked = normalizedBlockedSet(blockedUsernames);
     const result = { posts: 0, quotes: 0, profileNames: 0 };
 
     for (const post of collectPosts(root)) {

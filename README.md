@@ -58,21 +58,24 @@ where each is answered:
 
 | Question | Where |
 | --- | --- |
-| Does it phone home? | [`src/page-bridge.js`](src/page-bridge.js) — all requests go through `fetchApi`, and `API_ROOT` is the only base URL |
-| What happens to my auth header? | [`src/page-bridge.js`](src/page-bridge.js), `captureAuthorization` — module-local, never published |
-| What is stored? | [`src/content.js`](src/content.js), `writeStatus` — the complete set of persisted keys |
-| Can it act before I consent? | [`src/content.js`](src/content.js) consent gate, [`src/settings-bridge.js`](src/settings-bridge.js) `hasCurrentConsent` |
+| Does it phone home? | [`src/background.js`](src/background.js), `fetchApi` and `assertAllowedApiRequest` — the worker constructs and validates every request |
+| What happens to my auth header? | [`src/page-bridge.js`](src/page-bridge.js), `captureAuthorization`, and [`src/background.js`](src/background.js), `runBridgeSession` — private, ephemeral, and never stored or sent to content |
+| What is stored? | [PRIVACY.md](PRIVACY.md) has the complete map; writes are in `src/onboarding.js`, `src/options.js`, and [`src/background.js`](src/background.js). `src/content.js` can report only bounded page counters to the worker. |
+| Can it act before I consent? | [`src/content.js`](src/content.js) consent gate and [`src/background.js`](src/background.js), `initializeBridge` |
 | Where can it run at all? | [`manifest.json`](manifest.json) `content_scripts[].matches`, and `isDiscussionUrl` in [`src/background.js`](src/background.js) |
 
 Every source file opens with a comment explaining its role and the reasoning
 behind anything non-obvious. [SECURITY.md](SECURITY.md) states the threat model
-and what is in and out of scope.
+and what is in and out of scope. [AUDIT_RESULTS.md](AUDIT_RESULTS.md) maps the
+v0.4.0 audit recommendations to verified fixes, measurements, and remaining
+hypotheses.
 
 ## Privacy
 
 No browsing data, block list, authentication value, or discussion content is
-sent to any third-party server. There is no developer-controlled server, no
-analytics, no telemetry, and no remote code.
+sent to Terwox or to any server other than the BGG/Geekdo endpoints required for
+the disclosed features. There is no developer-controlled server, analytics,
+telemetry, or remote code.
 
 On first install the extension opens a one-time privacy disclosure. It does not
 read or filter BGG data until you affirmatively agree. If the disclosure text
@@ -81,11 +84,11 @@ version.
 
 | Data | Where it lives | Leaves your machine? |
 | --- | --- | --- |
-| `GeekAuth` authorization header | page memory only | only back to `api.geekdo.com`, where BGG already sends it |
-| Blocked user IDs and usernames | `chrome.storage.local` | no |
-| Profile ID→username cache | BGG-origin `localStorage`, 30-day TTL | no |
-| Consent record and options | `chrome.storage.local` | no |
-| Hidden post/quote and redacted-name counts | `chrome.storage.local` | no |
+| `GeekAuth` authorization header | ephemeral MAIN-world and background-worker memory | only back to `api.geekdo.com`, where BGG already sends it |
+| Consent record and subscription-linking option | `chrome.storage.local` | no |
+| Blocked usernames, result status, and counts | `chrome.storage.local` | no |
+| Profile ID→username cache | `chrome.storage.local`; entries older than 30 days are never reused and the next successful sync prunes stale/non-current IDs | no |
+| Subscription-linking status | `chrome.storage.local` | no |
 | Reply drafts | never stored; sanitized in place | no |
 
 Full disclosure text: [PRIVACY.md](PRIVACY.md).
@@ -94,8 +97,11 @@ Full disclosure text: [PRIVACY.md](PRIVACY.md).
 
 Filtering and BGG-data code runs only on canonical HTTPS URLs for forum indexes,
 forum threads, GeekLists, images, videos, files, and individual blog posts. It
-does not inject on BGG's home page, game pages, collection, store, account pages,
-or any other site.
+does not activate filtering or credential capture on BGG's home page, game pages,
+collection, store, account pages, or any other site. After a single-page route
+leaves a supported page, a tiny local teardown function may run on the destination
+BGG page only to remove previously installed behavior; it reads no page data and
+makes no network request.
 
 If BGG enters a supported discussion through an in-page route change, the
 background worker injects that same discussion-only code at the new URL; this
@@ -103,10 +109,11 @@ covers routes that do not create a new document for Chrome's declarative path
 matching.
 
 Chrome represents host permissions at the origin level and ignores their path
-component, so the extension details UI still names BoardGameGeek as a site even
-though content-script injection is path-limited. The extension uses Chrome's
-warning-free `scripting` permission for that attachment and does **not** request
-`tabs` or `webNavigation`, which would expose broad browsing-history access.
+component. The extension therefore declares the canonical BoardGameGeek origin
+for path-limited discussion integration and the canonical Geekdo API origin for
+background synchronization. It uses `scripting` for document-bound attachment
+and does **not** request `tabs` or `webNavigation`, which would expose broad
+browsing-history access.
 
 ## Subscription linking
 
@@ -123,23 +130,42 @@ available and untouched:
 
 ## How it works
 
-BGG's frontend requests `https://api.geekdo.com/api/userblock`, which returns the
-signed-in user's blocked user IDs. A document-start bridge running in the page's
-own JavaScript context observes the `GeekAuth` request header that BGG itself
-adds, uses it only in memory to request the block list and public usernames, and
-never sends it to the isolated content script or saves it.
+BGG's frontend requests `https://api.geekdo.com/api/userblock`. A short MAIN-world
+bridge observes the `GeekAuth` request header that BGG itself adds and returns
+that value only through Chrome's private `executeScript` result. It never enters
+the DOM, extension storage, logs, or the isolated content script. Header
+inspection becomes inert immediately after that one result; the remaining
+native-mutation wrappers retain no authorization binding.
 
-The isolated content script caches only the consent record, blocked usernames,
-the subscription-linking option, and status counts in `chrome.storage.local`. A
-`MutationObserver` applies the same filter to posts, thread listings, and thumbs
+The background worker validates the exact sending document and current consent,
+receives the privately captured authorization value, then rechecks consent and
+the subscription option. It constructs every Geekdo URL itself and performs the authenticated API
+requests in the extension service worker, where page code cannot forge response
+data. Redirects and unexpected methods, paths, queries, identifiers, response
+sizes, request totals, or pagination destinations are refused. Consent and options are checked
+again before each subscription addition and before cache/status persistence or
+the public response. The authorization reference is cleared when synchronization
+settles; content receives only public usernames and status.
+
+The MAIN-world wrapper also notices a native, non-`GET` Hidden Users request and
+emits a data-free event bound to that document's random session nonce. An
+isolated relay can forward only that nonce and a fixed revocation message. The
+worker accepts it only from the matching active top-level document and uses it
+only to pause optional subscription linking; it grants no read or write
+authority. A later supported discussion-page load retries linking from fresh
+Hidden Users and subscription-block reads.
+
+A `MutationObserver` applies the filter to posts, thread listings, and thumbs
 popovers loaded dynamically. On forum indexes, blocked thread-author and
 latest-reply profile links and their avatar-popup triggers become plain
 **Blocked** labels with no profile card on hover; thread titles, dates,
 statistics, and navigation remain intact. In a post's thumbs popover, each
 blocked giver likewise becomes an inert **Blocked** label while allowed givers
-remain normal profile links. Profile ID-to-name mappings are cached for 30 days
-in BGG's own local storage to avoid repeating every public profile request on
-every page.
+remain normal profile links. Profile ID-to-name mappings are cached in
+`chrome.storage.local` for up to 30 days to avoid repeating every public profile
+request on every page. Each successful synchronization retains mappings only
+for IDs still on the current Hidden Users list. The obsolete BGG-origin
+`localStorage` cache is removed.
 
 The discussion page stays hidden until the first filtering pass completes, so
 blocked content does not flash onscreen. Live synchronization reveals it
@@ -166,20 +192,28 @@ that subtree — while preserving the allowed post being quoted and its reply te
 It then emits the editor's normal input event so BGG adopts the sanitized draft.
 Reply drafts are never stored.
 
-When subscription linking is enabled, the bridge reads BGG's current user-level
-subscription blocks and sends BGG a `PUT` only for hidden user IDs that are
-missing. It never removes a subscription block.
+When subscription linking is enabled, the background worker reads BGG's current
+user-level subscription blocks and sends BGG a `PUT` only for hidden user IDs
+that are missing. It never removes a subscription block. Before each addition it
+reads Hidden Users again and skips an ID that is no longer present. This is a
+best-effort race check, not an atomic transaction: Geekdo exposes a separate
+`GET` followed by an unconditional `PUT`, with no conditional revision token, so
+a native change can still land between those requests.
 
 ## Development
 
 ```bash
+python3 -m venv ../bgg-hard-block-venv
+source ../bgg-hard-block-venv/bin/activate
+python3 -m pip install --require-hashes -r requirements-dev.txt
 ./scripts/test.sh      # full check suite; needs Chrome or Chromium
 ./scripts/package.sh   # build the store ZIP into artifacts/
 ```
 
-The test suite has no package dependencies and drives real DOM APIs in headless
-Chromium rather than mocking them, because most of the risk here is whether the
-selectors match BGG's actual markup. It covers native BGG placeholders, full
+The shipped extension has no runtime dependencies. Contributors install the
+hash-locked `websockets` test dependency above. The suite drives real DOM APIs
+in headless Chromium rather than mocking them, because most of the risk here is
+whether the selectors match BGG's actual markup. It covers native BGG placeholders, full
 blocked-author posts, blocked quotations inside allowed replies, username
 normalization, authenticated API bridging, credential non-disclosure,
 pre-consent inactivity, affirmative onboarding, consent-triggered discussion-tab
@@ -190,26 +224,45 @@ redaction,
 progressive hydration, per-item paint quarantine, full-sweep recovery,
 quote-composer sanitization, and status storage.
 
-An optional networked smoke test loads the unpacked extension into a disposable
-Chromium profile, seeds a temporary test username, and verifies post and quote
-removal against a live BGG thread:
+An optional networked smoke test loads the unpacked extension into a disposable,
+signed-out Chromium profile, seeds a temporary cached username, and verifies
+post and quote removal against a live BGG thread:
 
 ```bash
 python3 scripts/live_smoke.py --chrome /path/to/chrome
 ```
 
-If BGG gives headless Chromium a Cloudflare challenge, the test keeps the real
-extension loaded on the BGG origin and substitutes the live markup shape
-captured during development.
+Use Chromium or Chrome for Testing; current branded Chrome builds ignore the
+command-line flag for loading unpacked extensions. If BGG gives headless
+Chromium a Cloudflare challenge, the test keeps the real extension loaded on the
+BGG origin and substitutes the markup shape captured during development. That
+fallback verifies extension behavior, not current live-site compatibility.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
 
+## v0.4.0
+
+- Moved MAIN-world injection and all consent/option authorization into the
+  background trust boundary; removed the declarative MAIN-world and settings
+  bridges.
+- Moved authenticated API requests into the service worker so page-controlled
+  network functions and responses cannot become persisted block data or writes.
+- Added narrowly scoped `api.geekdo.com` host access for those worker-owned
+  requests; Chrome may ask existing users to approve the permission update.
+- Moved the profile ID-to-username cache from BGG `localStorage` to
+  `chrome.storage.local`; entries older than 30 days are ignored, and each
+  successful sync prunes stale and no-longer-current IDs.
+- Rejects unversioned cached block-list state from the retired page-data bridge.
+- Hardened release packaging with a tracked-file allowlist, deterministic stored
+  ZIP entries, hash-locked test tooling, and Windows/Linux byte comparison in CI.
+
 ## Current BGG assumptions
 
-The implementation was checked against BGG's live Angular discussion markup on
-August 13, 2026:
+The controlled fixtures encode these expected BGG Angular and API contracts.
+They were not independently reverified against an authenticated live session in
+the August 15, 2026 audit:
 
 - posts are wrapped in `gg-post` with an `article.post`
 - native blocked posts render `Blocked User`, `Show Anyway`, and an
