@@ -10,30 +10,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 from pathlib import Path
-import signal
 import subprocess
 import tempfile
-import time
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import websockets
 
-
-def wait_for_debug_port(profile_dir: Path, process: subprocess.Popen[bytes]) -> int:
-    marker = profile_dir / "DevToolsActivePort"
-    deadline = time.monotonic() + 10
-
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"Chromium exited early with status {process.returncode}")
-        if marker.exists():
-            return int(marker.read_text(encoding="utf-8").splitlines()[0])
-        time.sleep(0.05)
-
-    raise TimeoutError("Chromium did not expose a DevTools port")
+from chromium_process import (
+    background_process_kwargs,
+    stop_process_tree,
+    wait_for_debug_port,
+)
 
 
 def open_target(port: int, fixture: Path) -> str:
@@ -91,21 +80,14 @@ async def wait_for_result(websocket_url: str) -> tuple[str, str]:
     return "timeout", "fixture did not publish a result within 8 seconds"
 
 
-def stop_process_group(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-
-    os.killpg(process.pid, signal.SIGTERM)
-    try:
-        process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=3)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--chrome", required=True)
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="print the fixture's structured report after a successful run",
+    )
     parser.add_argument("fixture", type=Path)
     args = parser.parse_args()
 
@@ -127,7 +109,7 @@ def main() -> int:
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            **background_process_kwargs(),
         )
 
         try:
@@ -135,13 +117,14 @@ def main() -> int:
             websocket_url = open_target(port, args.fixture)
             state, report = asyncio.run(wait_for_result(websocket_url))
         finally:
-            stop_process_group(process)
+            stop_process_tree(process)
 
     if state != "pass":
         print(f"{args.fixture.name}: {state.upper()} {report}")
         return 1
 
-    print(f"{args.fixture.stem}: PASS")
+    suffix = f" {report}" if args.report and report else ""
+    print(f"{args.fixture.stem}: PASS{suffix}")
     return 0
 
 

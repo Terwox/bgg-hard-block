@@ -3,20 +3,34 @@
   <head>
     <meta charset="utf-8">
     <title>Content runtime test</title>
-    <meta id="bgg-hard-blocker-data" content='{"status":"ready","usernames":["Muted User"],"unresolved":[],"syncedAt":"2026-08-04T00:00:00.000Z"}'>
     <link rel="stylesheet" href="../src/content.css">
     <script>
       const writes = [];
       globalThis.chrome = {
+        runtime: {
+          async sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              writes.push(message);
+              return { status: "ok" };
+            }
+            return {
+              status: "ready",
+              usernames: ["Muted User"],
+              unresolvedCount: 0,
+              syncedAt: "2026-08-04T00:00:00.000Z"
+            };
+          }
+        },
         storage: {
           local: {
             async get() {
               return {
                 bggHardBlockerConsent: {
                   granted: true,
-                  disclosureVersion: "2026-08-13"
+                  disclosureVersion: "2026-08-15"
                 },
                 bggHardBlockerState: {
+                  schemaVersion: 1,
                   usernames: ["Muted User"],
                   status: { lastSync: "2026-08-04T00:00:00.000Z" }
                 }
@@ -131,7 +145,17 @@ Allowed reply survives.
           "allowed forum-list username was changed"
         );
         check(writes.length > 0, "runtime status was not written");
-        const status = writes.at(-1)?.bggHardBlockerState?.status;
+        const status = writes.at(-1)?.status;
+        check(
+          !Object.hasOwn(status || {}, "pageUrl"),
+          "runtime status retained the discussion URL"
+        );
+        check(
+          ["blockedCount", "lastSync", "source", "unresolved"].every(
+            (key) => !Object.hasOwn(status || {}, key)
+          ),
+          "runtime status included background-owned canonical metadata"
+        );
         check(status?.hiddenPosts === 1, `expected 1 hidden post, got ${status?.hiddenPosts}`);
         check(status?.hiddenQuotes === 1, `expected 1 hidden quote, got ${status?.hiddenQuotes}`);
         check(
@@ -149,7 +173,7 @@ Allowed reply survives.
         document.body.dataset.status = failures.length ? "fail" : "pass";
         document.body.dataset.report = JSON.stringify({
           failures,
-          stored: writes.at(-1)
+          statusMessage: writes.at(-1)
         });
       }, 650);
     </script>

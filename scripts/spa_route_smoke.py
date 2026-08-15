@@ -18,13 +18,16 @@ import websockets
 
 from live_smoke import (
     TEST_USERNAME,
-    debug_port,
     evaluate,
     find_extension_id,
     grant_consent,
     open_target,
     seed_cached_block_list,
-    stop_process_group,
+)
+from chromium_process import (
+    background_process_kwargs,
+    stop_process_tree,
+    wait_for_debug_port,
 )
 
 
@@ -94,7 +97,11 @@ async def enter_discussion_and_filter(websocket_url: str) -> dict[str, object]:
         counter, routed_href = await evaluate(
             websocket,
             counter,
-            f"history.pushState({{}}, '', {json.dumps(DISCUSSION_PATH)}); location.href",
+            # Freeze any in-flight Cloudflare challenge navigation before the
+            # synthetic same-document route. Otherwise a late challenge reload
+            # can replace the document while this smoke is testing extension
+            # routing rather than BoardGameGeek availability.
+            f"window.stop(); history.pushState({{}}, '', {json.dumps(DISCUSSION_PATH)}); location.href",
         )
 
         deadline = asyncio.get_running_loop().time() + 8
@@ -180,11 +187,11 @@ def main() -> int:
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            **background_process_kwargs(),
         )
 
         try:
-            port = debug_port(profile_dir, process)
+            port = wait_for_debug_port(profile_dir, process)
             identifier = asyncio.run(find_extension_id(port))
             extension_ws = open_target(
                 port, f"chrome-extension://{identifier}/src/onboarding.html"
@@ -195,7 +202,7 @@ def main() -> int:
             initial = asyncio.run(wait_for_document(page_ws))
             result = asyncio.run(enter_discussion_and_filter(page_ws))
         finally:
-            stop_process_group(process)
+            stop_process_tree(process)
 
     failures = []
     if initial.get("running") or result["before"].get("running"):

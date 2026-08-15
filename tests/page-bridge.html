@@ -2,87 +2,127 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Page bridge test</title>
-    <meta id="bgg-hard-blocker-settings" content='{"consentGranted":true,"linkSubscriptionBlocks":true}'>
-  </head>
-  <body data-status="running">
+    <title>Private authorization capture bridge test</title>
     <script>
-      const calls = [];
-      const responseFor = (url) => {
-        if (url.endsWith("/api/userblock")) return [1001, 42];
-        if (url.includes("/api/blocks?type=user")) {
-          return {
-            essentialItems: [],
-            feeds: [{ item: { type: "user", id: "1001" } }],
-            links: []
-          };
-        }
-        if (url.endsWith("/api/user/1001")) return { username: "Muted User" };
-        if (url.endsWith("/api/user/42")) return { username: "Another Blocked User" };
-        return { ok: true };
+      const pageCalls = [];
+      const storageCalls = [];
+      const consoleCalls = [];
+      const runtimeErrors = [];
+      const hostilePageResponse = {
+        status: "error",
+        authorization: "attacker-controlled",
+        usernames: ["Page-Owned Fake"],
+        profileCache: { 42: { username: "Page-Owned Fake" } },
+        subscriptionLinking: { state: "synced" }
       };
 
-      window.fetch = async (input, init = {}) => {
+      const originalFetch = async (input, init = {}) => {
         const url = String(input instanceof Request ? input.url : input);
-        const method = String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-        calls.push({ url, method, headers: new Headers(init.headers || {}) });
-        if (method === "PUT") {
-          return new Response(null, { status: 204 });
-        }
-        return new Response(JSON.stringify(responseFor(url)), {
+        const method = String(init.method || input?.method || "GET").toUpperCase();
+        pageCalls.push({ url, method });
+        return new Response(JSON.stringify(hostilePageResponse), {
           status: 200,
           headers: { "Content-Type": "application/json" }
         });
       };
+      window.fetch = originalFetch;
+
+      globalThis.chrome = {
+        storage: {
+          local: {
+            get(...args) {
+              storageCalls.push({ operation: "get", args });
+              return Promise.resolve({});
+            },
+            set(...args) {
+              storageCalls.push({ operation: "set", args });
+              return Promise.resolve();
+            }
+          }
+        }
+      };
+
+      for (const method of ["log", "warn", "error"]) {
+        const original = console[method].bind(console);
+        console[method] = (...args) => {
+          consoleCalls.push({ method, args: args.map(String) });
+          original(...args);
+        };
+      }
+      addEventListener("error", (event) => runtimeErrors.push(event.message));
+      addEventListener("unhandledrejection", (event) => runtimeErrors.push(String(event.reason)));
     </script>
     <script src="../src/page-bridge.js"></script>
-    <script src="../src/page-bridge.js"></script>
+  </head>
+  <body data-status="running">
+    <p id="page-content">Page-owned content</p>
     <script>
-      fetch("https://api.geekdo.com/api/user/549040", {
-        headers: { Authorization: "GeekAuth test-only-token" }
-      });
-      fetch("https://api.geekdo.com/api/thread/123", {
-        headers: { Authorization: "GeekAuth test-only-token" }
-      });
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const originalXhrOpen = XMLHttpRequest.prototype.open;
+      const originalXhrSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+      const authorization = ["GeekAuth ", "private", "-capture-token"].join("");
 
-      setTimeout(() => {
-        const failures = [];
-        const element = document.getElementById("bgg-hard-blocker-data");
-        const payload = JSON.parse(element?.getAttribute("content") || "null");
-        const check = (condition, message) => {
-          if (!condition) failures.push(message);
-        };
+      (async () => {
+        const resultPromise = installBggBlockListBridge({
+          allowFileFixture: true,
+          channelNonce: "b".repeat(32),
+          linkSubscriptionBlocks: true,
+          profileCache: hostilePageResponse.profileCache
+        });
+        const response = await fetch("https://api.geekdo.com/api/thread/123", {
+          headers: { Authorization: authorization }
+        });
+        const pageResult = await response.json();
+        const result = await resultPromise;
 
-        check(payload?.status === "ready", "bridge did not publish a ready state");
-        check(payload?.userIds?.length === 2, "bridge did not return both block IDs");
-        check(payload?.usernames?.includes("Muted User"), "first username was not resolved");
-        check(payload?.usernames?.includes("Another Blocked User"), "second username was not resolved");
-        check(!element?.getAttribute("content").includes("test-only-token"), "auth token leaked into bridge data");
-        check(calls.some((call) => call.url.endsWith("/api/userblock")), "block-list API was not requested");
         check(
-          calls.filter((call) => call.url.endsWith("/api/userblock")).length === 1,
-          "the same auth token triggered duplicate block-list synchronizations"
+          JSON.stringify(Object.keys(result).sort()) ===
+            JSON.stringify(["authorization", "status"]),
+          `private result exposed unexpected fields: ${JSON.stringify(result)}`
+        );
+        check(result.status === "ready", "bridge did not report captured authorization as ready");
+        check(pageResult.status === "error", "bridge changed the page-owned response status");
+        check(result.authorization === authorization, "bridge changed the captured authorization");
+        check(
+          pageResult.usernames?.[0] === "Page-Owned Fake",
+          "bridge changed the page's own fetch response"
+        );
+        check(pageCalls.length === 1, `bridge performed extra API work (${pageCalls.length} calls)`);
+        check(pageCalls[0]?.method === "GET", "bridge induced a write request");
+        check(storageCalls.length === 0, "MAIN-world bridge accessed extension storage");
+        check(!document.documentElement.outerHTML.includes(authorization), "authorization entered the DOM");
+        check(!JSON.stringify(storageCalls).includes(authorization), "authorization entered storage calls");
+        check(!JSON.stringify(consoleCalls).includes(authorization), "authorization entered console output");
+        check(!JSON.stringify(runtimeErrors).includes(authorization), "authorization entered an error");
+        check(!document.querySelector('[id^="bgg-hard-blocker-data"]'), "bridge published a DOM payload");
+
+        globalThis.__bggHardBlockerStop();
+        check(window.fetch === originalFetch, "stop did not restore the exact fetch function");
+        check(
+          XMLHttpRequest.prototype.open === originalXhrOpen,
+          "stop did not restore the exact XMLHttpRequest.open function"
         );
         check(
-          calls.filter((call) => call.method === "PUT" && call.url.endsWith("/api/user/42/blocks")).length === 1,
-          "the missing user was not linked to subscription blocks"
-        );
-        check(
-          !calls.some((call) => call.method === "PUT" && call.url.endsWith("/api/user/1001/blocks")),
-          "an existing subscription block was written again"
-        );
-        check(
-          payload?.subscriptionLinking?.state === "synced",
-          "subscription linking did not publish a synced state"
-        );
-        check(
-          payload?.subscriptionLinking?.subscriptionBlockedCount === 2,
-          "subscription linking published the wrong count"
+          XMLHttpRequest.prototype.setRequestHeader === originalXhrSetRequestHeader,
+          "stop did not restore the exact XMLHttpRequest.setRequestHeader function"
         );
 
         document.body.dataset.status = failures.length ? "fail" : "pass";
-        document.body.dataset.report = JSON.stringify({ failures, callCount: calls.length });
-      }, 200);
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          resultKeys: Object.keys(result).sort(),
+          pageCallCount: pageCalls.length,
+          storageCallCount: storageCalls.length
+        });
+      })().catch((error) => {
+        document.body.dataset.status = "fail";
+        document.body.dataset.report = JSON.stringify({
+          failures: [...failures, error?.stack || String(error)]
+        });
+      });
     </script>
   </body>
 </html>

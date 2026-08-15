@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BGG Hard Block",
-  "version": "0.3.15",
+  "version": "0.4.0",
   "description": "Hard-removes hidden users from BGG discussions and optionally links them to subscription blocks.",
   "minimum_chrome_version": "111",
   "homepage_url": "https://github.com/terwox/bgg-hard-block",
@@ -10,7 +10,8 @@
     "storage"
   ],
   "host_permissions": [
-    "https://boardgamegeek.com/*"
+    "https://boardgamegeek.com/*",
+    "https://api.geekdo.com/*"
   ],
   "background": {
     "service_worker": "src/background.js"
@@ -36,38 +37,6 @@
     "128": "icons/icon-128.png"
   },
   "content_scripts": [
-    {
-      "matches": [
-        "https://boardgamegeek.com/forum/*",
-        "https://boardgamegeek.com/thread/*",
-        "https://boardgamegeek.com/geeklist/*",
-        "https://boardgamegeek.com/image/*",
-        "https://boardgamegeek.com/video/*",
-        "https://boardgamegeek.com/filepage/*",
-        "https://boardgamegeek.com/blog/*/blogpost/*"
-      ],
-      "js": [
-        "src/page-bridge.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": [
-        "https://boardgamegeek.com/forum/*",
-        "https://boardgamegeek.com/thread/*",
-        "https://boardgamegeek.com/geeklist/*",
-        "https://boardgamegeek.com/image/*",
-        "https://boardgamegeek.com/video/*",
-        "https://boardgamegeek.com/filepage/*",
-        "https://boardgamegeek.com/blog/*/blogpost/*"
-      ],
-      "js": [
-        "src/settings-bridge.js"
-      ],
-      "run_at": "document_start",
-      "world": "ISOLATED"
-    },
     {
       "matches": [
         "https://boardgamegeek.com/forum/*",

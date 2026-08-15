@@ -1,9 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-#
-# Runs the same checks a contributor runs locally via ./scripts/test.sh, plus a
-# reproducibility check that builds the package twice and asserts the two ZIPs
-# are byte-identical. That second job is what keeps the verification procedure in
-# BUILD.md honest.
 name: CI
 
 on:
@@ -15,54 +10,73 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHON_VERSION: '3.12.11'
+  NODE_VERSION: '24.19.0'
+
 jobs:
   test:
-    name: Extension checks
-    runs-on: ubuntu-latest
+    name: Extension checks and package
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      # ubuntu-latest ships Chrome preinstalled at this path; scripts/test.sh
-      # also probes for it, but setting CHROME_BIN makes the failure mode obvious
-      # if the runner image ever changes.
+      - name: Install hash-locked test dependency
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
       - name: Run extension checks
         env:
           CHROME_BIN: /usr/bin/google-chrome
         run: ./scripts/test.sh
 
-  reproducible:
-    name: Reproducible package
-    runs-on: ubuntu-latest
+      - name: Build package
+        run: ./scripts/package.sh
+
+  package-windows:
+    name: Package on Windows
+    runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Build twice and compare
-        run: |
-          set -euo pipefail
-          first="$(./scripts/package.sh)"
-          hash_one="$(sha256sum "$first" | cut -d' ' -f1)"
-          rm -f "$first"
+      - name: Build Windows package
+        run: python scripts/make_zip.py . artifacts/windows.zip
 
-          second="$(./scripts/package.sh)"
-          hash_two="$(sha256sum "$second" | cut -d' ' -f1)"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-package
+          path: artifacts/windows.zip
+          if-no-files-found: error
 
-          echo "build 1: $hash_one"
-          echo "build 2: $hash_two"
+  reproducible:
+    name: Cross-platform reproducible package
+    needs: package-windows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-          if [ "$hash_one" != "$hash_two" ]; then
-            echo "::error::Package build is not reproducible; BUILD.md verification is broken." >&2
-            exit 1
-          fi
-          echo "Package build is reproducible: $hash_two"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Linux package
+        run: python scripts/make_zip.py . artifacts/linux.zip
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-package
+          path: artifacts/windows
+
+      - name: Compare Windows and Linux packages
+        run: cmp artifacts/linux.zip artifacts/windows/windows.zip

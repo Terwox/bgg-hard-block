@@ -3,7 +3,6 @@
   <head>
     <meta charset="utf-8">
     <title>Mixed unpacked-version runtime test</title>
-    <meta id="bgg-hard-blocker-data" content='{"status":"ready","usernames":[],"unresolved":[],"syncedAt":"2026-08-05T00:00:00.000Z"}'>
     <link rel="stylesheet" href="../src/content.css">
     <script>
       const writes = [];
@@ -11,6 +10,18 @@
         runtime: {
           getManifest() {
             return { version: "0.3.2" };
+          },
+          async sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              writes.push(message);
+              return { status: "ok" };
+            }
+            return {
+              status: "ready",
+              usernames: [],
+              unresolvedCount: 0,
+              syncedAt: "2026-08-05T00:00:00.000Z"
+            };
           }
         },
         storage: {

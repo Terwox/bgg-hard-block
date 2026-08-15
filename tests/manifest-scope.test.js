@@ -23,8 +23,8 @@ const discussionMatches = [
 
 assert.deepEqual(
   manifest.host_permissions,
-  ["https://boardgamegeek.com/*"],
-  "host access must stay on BGG's canonical HTTPS origin"
+  ["https://boardgamegeek.com/*", "https://api.geekdo.com/*"],
+  "host access must stay on BGG's canonical page and API HTTPS origins"
 );
 
 assert.deepEqual(
@@ -32,6 +32,19 @@ assert.deepEqual(
   ["scripting", "storage"],
   "SPA recovery may use scripting but must not request tabs or webNavigation history access"
 );
+
+assert.equal(
+  manifest.content_scripts.length,
+  1,
+  "only the consent-gated isolated filter may be declaratively installed"
+);
+assert.deepEqual(
+  manifest.content_scripts[0].js,
+  ["src/content-core.js", "src/content.js"],
+  "MAIN-world and settings bridges must remain background-authorized"
+);
+assert.equal(manifest.content_scripts[0].world, "ISOLATED");
+assert.equal(manifest.content_scripts[0].run_at, "document_start");
 
 for (const contentScript of manifest.content_scripts) {
   assert.deepEqual(

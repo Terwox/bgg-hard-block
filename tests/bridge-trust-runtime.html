@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Content runtime private-response trust test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <meta
+      id="bgg-hard-blocker-data"
+      content='{"status":"ready","usernames":["Legacy User"],"unresolvedCount":0,"syncedAt":"2026-08-15T00:00:00.000Z"}'
+    >
+    <script>
+      const writes = [];
+      const storageReads = [];
+      const runtimeErrors = [];
+      let bridgeRequest = null;
+      let resolveBridgeRequest = null;
+      addEventListener("error", (event) => runtimeErrors.push(event.message));
+      addEventListener("unhandledrejection", (event) => runtimeErrors.push(String(event.reason)));
+
+      globalThis.chrome = {
+        runtime: {
+          getManifest() {
+            return { version: "0.4.0" };
+          },
+          sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              writes.push(message);
+              return Promise.resolve({ status: "ok" });
+            }
+            bridgeRequest = message;
+            return new Promise((resolve) => {
+              resolveBridgeRequest = resolve;
+            });
+          }
+        },
+        storage: {
+          local: {
+            async get(key) {
+              storageReads.push(key);
+              if (key === "bggHardBlockerConsent") {
+                return {
+                  bggHardBlockerConsent: {
+                    granted: true,
+                    disclosureVersion: "2026-08-15"
+                  }
+                };
+              }
+              return {};
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <main>
+      <gg-post id="legacy-user-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Legacy%20User">Legacy User</a></header>
+          <div class="post-body">Fixed legacy DOM bridge input must be ignored.</div>
+        </article>
+      </gg-post>
+      <gg-post id="random-channel-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Random%20Channel">Random Channel</a></header>
+          <div class="post-body">Randomized DOM bridge input must be ignored.</div>
+        </article>
+      </gg-post>
+      <gg-post id="correct-channel-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Correct%20Channel">Correct Channel</a></header>
+          <div class="post-body">Even the captured nonce cannot create a DOM trust channel.</div>
+        </article>
+      </gg-post>
+      <gg-post id="trusted-user-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Trusted%20User">Trusted User</a></header>
+          <div class="post-body">Only the private runtime response may filter this post.</div>
+        </article>
+      </gg-post>
+    </main>
+    <script>
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      const readyPayload = (usernames, extra = {}) => ({
+        status: "ready",
+        usernames,
+        unresolvedCount: 0,
+        syncedAt: "2026-08-15T00:00:00.000Z",
+        ...extra
+      });
+      const publish = (elementId, eventName, payload) => {
+        document.getElementById(elementId)?.remove();
+        const element = document.createElement("meta");
+        element.id = elementId;
+        element.setAttribute("content", JSON.stringify(payload));
+        document.head.append(element);
+        document.dispatchEvent(new Event(eventName));
+      };
+
+      (async () => {
+        for (let attempt = 0; attempt < 20 && !bridgeRequest; attempt += 1) {
+          await wait(0);
+        }
+
+        const nonce = bridgeRequest?.channelNonce;
+        check(
+          bridgeRequest?.type === "bgg-hard-blocker:initialize-bridge:v1",
+          "content runtime did not use the private bridge request type"
+        );
+        check(/^[0-9a-f]{32}$/.test(nonce || ""), "content runtime did not generate a 128-bit nonce");
+        check(typeof resolveBridgeRequest === "function", "private runtime response was not captured");
+        if (!nonce || typeof resolveBridgeRequest !== "function") {
+          throw new Error("private runtime request setup failed");
+        }
+
+        document.dispatchEvent(new Event("bgg-hard-blocker:blocklist"));
+        const randomNonce = nonce === "f".repeat(32) ? "e".repeat(32) : "f".repeat(32);
+        publish(
+          `bgg-hard-blocker-data-${randomNonce}`,
+          `bgg-hard-blocker:blocklist:${randomNonce}`,
+          readyPayload(["Random Channel"])
+        );
+        publish(
+          `bgg-hard-blocker-data-${nonce}`,
+          `bgg-hard-blocker:blocklist:${nonce}`,
+          readyPayload(["Correct Channel"], {
+            subscriptionLinking: { state: "synced", enabled: true }
+          })
+        );
+        await wait(75);
+
+        check(Boolean(document.getElementById("legacy-user-post")), "fixed DOM channel filtered content");
+        check(Boolean(document.getElementById("random-channel-post")), "random DOM channel filtered content");
+        check(Boolean(document.getElementById("correct-channel-post")), "captured-nonce DOM channel filtered content");
+        check(Boolean(document.getElementById("trusted-user-post")), "DOM input filtered the runtime-response user");
+        check(writes.length === 0, "DOM bridge input reached extension storage");
+        check(
+          !document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "DOM bridge input authorized page reveal"
+        );
+
+        resolveBridgeRequest(readyPayload(["Trusted User"], {
+          subscriptionLinking: { state: "synced", enabled: true },
+          profileCache: { 42: { username: "Attacker Cache" } }
+        }));
+        await wait(75);
+
+        check(!document.getElementById("trusted-user-post"), "validated runtime response did not filter");
+        check(Boolean(document.getElementById("legacy-user-post")), "runtime response adopted legacy DOM data");
+        check(Boolean(document.getElementById("random-channel-post")), "runtime response adopted random DOM data");
+        check(Boolean(document.getElementById("correct-channel-post")), "runtime response adopted nonce DOM data");
+        check(
+          document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "validated runtime response did not authorize reveal"
+        );
+        check(writes.length > 0, "validated runtime response did not report status");
+        const stored = writes.at(-1) || {};
+        check(
+          !Object.hasOwn(stored, "usernames") && !Object.hasOwn(stored.status || {}, "usernames"),
+          `content status tried to rewrite canonical usernames: ${JSON.stringify(stored)}`
+        );
+        check(
+          ["blockedCount", "lastSync", "source", "unresolved"].every(
+            (key) => !Object.hasOwn(stored.status || {}, key)
+          ),
+          "content status included background-owned canonical metadata"
+        );
+        check(
+          stored.type === "bgg-hard-blocker:update-content-status:v1",
+          "trusted runtime did not use the background status interface"
+        );
+        check(
+          !("bggHardBlockerSubscriptionState" in stored),
+          "runtime response set subscription status in storage"
+        );
+        check(
+          !JSON.stringify(stored).includes("subscriptionLinking") &&
+            !JSON.stringify(stored).includes("profileCache"),
+          "non-content runtime fields survived persistence sanitization"
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          bridgeRequest,
+          writeCount: writes.length,
+          stored
+        });
+      })().catch((error) => {
+        document.body.dataset.status = "fail";
+        document.body.dataset.report = JSON.stringify({
+          failures: [...failures, error?.stack || String(error)],
+          bridgeRequest,
+          writeCount: writes.length,
+          storageReads,
+          runtimeErrors
+        });
+      });
+    </script>
+  </body>
+</html>

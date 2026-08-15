@@ -41,9 +41,18 @@ Privacy by design:
 
 - the extension is inactive until you review its disclosure and affirmatively agree
 - processing happens locally in your browser
-- BGG authentication is used only in page memory and is never stored
+- BGG authentication is used only in temporary page/background memory and is never stored
 - data goes only to BGG/Geekdo endpoints needed for the disclosed features
 - no ads, analytics, telemetry, remote code, developer server, or third-party sharing
+
+Version 0.4.0 validates the exact requesting BGG discussion document, captures
+authentication privately, and performs authenticated API requests in the
+extension background worker so page code cannot forge response data. Consent and
+the subscription-linking option are checked before capture, before network work,
+before each subscription addition, and before any result is saved or returned.
+This security boundary requires direct host access to `api.geekdo.com`; Chrome
+may ask existing users to approve that new, narrowly scoped site access before
+the updated extension runs.
 
 BGG Hard Block is free. It is an unofficial project and is not affiliated with or
 endorsed by BoardGameGeek, LLC.
@@ -58,44 +67,77 @@ subscription blocks aligned with that same list.
 
 ### `scripting`
 
-Attaches the same local filter after BoardGameGeek enters a supported discussion
-URL through an in-page route change instead of loading a new document. It is used
-only on the seven disclosed discussion-page families and does not grant browsing-
-history access.
+Attaches the same isolated local filter after BoardGameGeek enters a supported
+discussion URL through an in-page route change, and performs a sender-document-
+bound MAIN-world credential capture only after the background worker confirms
+current consent. Injection for filtering or credential capture is limited to the seven
+disclosed discussion-page families. After a single-page route leaves scope, a
+tiny local teardown function may run on the destination BGG page only to remove
+the earlier installation. The extension does not request Chrome's `tabs`,
+`webNavigation`, or `history` permissions.
 
 ### `storage`
 
-Stores the user's consent record, subscription-linking preference, cached public
-BGG usernames, synchronization time, and local removal/status counts. No data is
-synced to the developer or a third party.
+Stores the consent record; subscription-linking option; blocked public usernames,
+result status, and local counts; a blocked-profile ID-to-username cache whose
+entries older than 30 days are never reused and whose next successful sync
+prunes stale/non-current IDs; and subscription-linking status. No draft text or
+authentication value is stored. No data is synced to the developer or any
+destination other than the required BGG/Geekdo endpoints.
 
-### BoardGameGeek page access
+### BoardGameGeek and Geekdo host access
 
-Required to read BGG's Hidden Users list through BGG's own HTTPS API, identify
-authors in rendered discussion markup, redact matching names on forum indexes
-and thumbs popovers, remove matching posts/placeholders/quotations, sanitize the
-reply draft BGG creates after a Quote click, and optionally add missing user-level subscription
-blocks to the signed-in BGG account. Filtering and BGG-data code is injected only
-on canonical HTTPS forum indexes, forum threads, GeekLists, images, videos,
-files, and individual blog posts. It does not run on unrelated BGG
-pages or any other site. Chrome ignores URL paths for host permissions, so the
-single canonical BGG origin permission is also used to identify supported open
-discussion tabs for automatic refresh after consent or extension updates and to
-attach the filter when BGG enters a supported URL through an in-page route change.
+The canonical BoardGameGeek origin is required to identify authors in rendered
+discussion markup, redact matching names, remove matching posts/placeholders/
+quotations, sanitize BGG-generated Quote drafts, identify supported open tabs for
+refresh, and attach the filter after an in-page route change. Injection for
+filtering or credential capture remains limited to the seven disclosed
+discussion-page families; scope-exit teardown may run on the destination BGG
+page only to remove previously installed behavior. The canonical Geekdo
+API origin is required for background requests to the Hidden Users list, public
+profiles, current user-level subscription blocks, and optional additions of
+missing subscription blocks. No other site or network origin is allowed.
 
 ## Data disclosures
 
 The extension handles these categories solely for its disclosed single purpose:
 
 - personally identifiable information: BGG user identifiers and public usernames
-- authentication information: the current BGG authorization value, transiently in page memory
+- authentication information: the current BGG authorization value, transiently
+  in MAIN-world and background-worker memory
 - website content: rendered BGG discussion posts, comments, author attributions,
   and BGG-generated reply-draft text; drafts are processed locally and never retained
-- web browsing activity: the current supported BGG discussion address, stored only for local status reporting
+- web browsing activity: the active address is checked only in memory to enforce
+  the seven supported BGG discussion-page families and is never retained
 
 The extension does not collect financial, health, location, personal communication,
 or advertising-profile data. Terwox receives no extension user data and no human can
 review it.
+
+There is no page-DOM block-list or settings bridge. The profile cache is stored
+only in `chrome.storage.local`; version 0.4.0 removes
+the obsolete BGG `localStorage` copy.
+
+A data-free event bound to a random per-document nonce can only pause optional
+linking when BGG's native Hidden Users changes. Linking retries on the next
+supported discussion-page load. Geekdo provides no conditional revision token,
+so the final Hidden Users `GET` and subscription-block `PUT` are separate rather
+than atomic.
+
+## Version 0.4.0 update
+
+- Removed declarative MAIN-world and settings bridges in favor of background-
+  authorized, sender-document-bound injection.
+- Moved authenticated API requests into the service worker so page-controlled
+  functions and responses cannot become persisted block data or subscription writes.
+- Added required access to only `https://api.geekdo.com/*` for those worker-owned
+  requests; existing users may need to approve Chrome's permission update.
+- Moved the bounded profile cache behind the extension storage boundary; stale
+  entries are ignored, and successful syncs prune stale/non-current IDs.
+- Rejects unversioned cached block-list state from the retired page-data bridge.
+- Hardened release packaging with an explicit tracked-file allowlist,
+  deterministic ZIP entries, hash-locked test tooling, and Windows/Linux byte
+  comparison in CI.
 
 ## Limited Use certifications
 

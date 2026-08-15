@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>CSS attachment failsafe test</title>
+    <link rel="stylesheet" href="../src/content.css">
+  </head>
+  <body data-status="running">
+    <p>Content must reveal even when the content script never attaches.</p>
+    <script>
+      const failures = [];
+      const check = (condition, message) => { if (!condition) failures.push(message); };
+
+      window.setTimeout(() => {
+        check(
+          getComputedStyle(document.body).visibility === "hidden",
+          "pre-attachment hold did not hide the page"
+        );
+      }, 100);
+
+      window.setTimeout(() => {
+        check(
+          getComputedStyle(document.body).visibility === "visible",
+          "two-second CSS failsafe did not reveal the page"
+        );
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures });
+      }, 2200);
+    </script>
+  </body>
+</html>

@@ -3,17 +3,26 @@
   <head>
     <meta charset="utf-8">
     <title>Lazy content runtime test</title>
-    <meta id="bgg-hard-blocker-data" content='{"status":"ready","usernames":["Muted User"],"unresolved":[],"syncedAt":"2026-08-05T00:00:00.000Z"}'>
     <link rel="stylesheet" href="../src/content.css">
     <script>
       globalThis.chrome = {
+        runtime: {
+          async sendMessage() {
+            return {
+              status: "ready",
+              usernames: ["Muted User"],
+              unresolvedCount: 0,
+              syncedAt: "2026-08-05T00:00:00.000Z"
+            };
+          }
+        },
         storage: {
           local: {
             async get() {
               return {
                 bggHardBlockerConsent: {
                   granted: true,
-                  disclosureVersion: "2026-08-13"
+                  disclosureVersion: "2026-08-15"
                 }
               };
             },
@@ -235,9 +244,22 @@
       }, 900);
 
       setTimeout(() => {
+        snapshots.irrelevantMutationSkippedSweep =
+          !allowedPost.hasAttribute(checkedAttribute) &&
+          getComputedStyle(allowedPost).visibility === "hidden";
+
+        const uncertainQuote = document.createElement("gg-markup-quote");
+        uncertainQuote.id = "uncertain-sweep-trigger";
+        uncertainQuote.innerHTML = `
+          <div class="c-header"><span class="user-attribution">Loading attribution</span></div>
+          <gg-markup-content>Still hydrating</gg-markup-content>`;
+        feed.append(uncertainQuote);
+      }, 1050);
+
+      setTimeout(() => {
         snapshots.fullSweepRestoredCheck = allowedPost.hasAttribute(checkedAttribute);
         snapshots.fullSweepRestoredVisibility = getComputedStyle(allowedPost).visibility;
-      }, 1050);
+      }, 1200);
 
       setTimeout(() => {
         const body = blockedPost.querySelector(".post-body");
@@ -342,9 +364,13 @@
         );
         check(snapshots.safePostHiddenBeforeSweep, "backup sweep setup did not hide the post");
         check(
+          snapshots.irrelevantMutationSkippedSweep,
+          "irrelevant mutation triggered a full-document sweep"
+        );
+        check(
           snapshots.fullSweepRestoredCheck &&
             snapshots.fullSweepRestoredVisibility === "visible",
-          "debounced full-document sweep did not recover a missed safe post"
+          "uncertainty fallback did not recover a missed safe post"
         );
         check(
           !document.getElementById("lazy-blocked-post"),

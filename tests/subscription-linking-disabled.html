@@ -2,56 +2,77 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Disabled subscription linking test</title>
-    <meta id="bgg-hard-blocker-settings" content='{"consentGranted":true,"linkSubscriptionBlocks":false}'>
+    <title>Page bridge ignores subscription linking option</title>
     <script>
       const calls = [];
-      window.fetch = async (input, init = {}) => {
+      const originalFetch = async (input, init = {}) => {
         const url = String(input instanceof Request ? input.url : input);
-        const method = String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+        const method = String(init.method || input?.method || "GET").toUpperCase();
         calls.push({ url, method });
-        let payload = { ok: true };
-        if (url.endsWith("/api/userblock")) payload = [42];
-        if (url.endsWith("/api/user/42")) payload = { username: "Muted User" };
-        if (url.includes("/api/blocks?type=user")) {
-          payload = { essentialItems: [], feeds: [], links: [] };
-        }
-        return new Response(JSON.stringify(payload), {
+        return new Response(JSON.stringify({
+          usernames: ["Page-Owned Fake"],
+          subscriptionLinking: { state: "synced", subscriptionBlockedCount: 1 }
+        }), {
           status: 200,
           headers: { "Content-Type": "application/json" }
         });
       };
+      window.fetch = originalFetch;
     </script>
     <script src="../src/page-bridge.js"></script>
   </head>
   <body data-status="running">
     <script>
-      fetch("https://api.geekdo.com/api/thread/123", {
-        headers: { Authorization: "GeekAuth test-only-token" }
-      });
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const authorization = "GeekAuth capture-only-disabled-option";
 
-      setTimeout(() => {
-        const failures = [];
-        const check = (condition, message) => {
-          if (!condition) failures.push(message);
-        };
-        const element = document.getElementById("bgg-hard-blocker-data");
-        const payload = JSON.parse(element?.getAttribute("content") || "null");
+      (async () => {
+        const resultPromise = installBggBlockListBridge({
+          allowFileFixture: true,
+          channelNonce: "b".repeat(32),
+          linkSubscriptionBlocks: false,
+          profileCache: { 42: { username: "Attacker Cache" } }
+        });
+        const pageResponse = await fetch("https://api.geekdo.com/api/thread/123", {
+          headers: { Authorization: authorization }
+        });
+        await pageResponse.json();
+        const result = await resultPromise;
 
-        check(payload?.status === "ready", "forum block-list sync did not finish");
-        check(payload?.subscriptionLinking?.state === "disabled", "disabled state was not published");
+        check(result.status === "ready", "capture-only bridge did not become ready");
+        check(result.authorization === authorization, "capture-only bridge changed authorization");
+        check(
+          JSON.stringify(Object.keys(result).sort()) ===
+            JSON.stringify(["authorization", "status"]),
+          "subscription option changed the private result shape"
+        );
+        check(!("subscriptionLinking" in result), "page bridge returned subscription status");
+        check(!("usernames" in result), "page response supplied usernames to the private result");
+        check(!("profileCache" in result), "configuration supplied cache to the private result");
+        check(calls.length === 1, `page bridge performed reconciliation (${calls.length} calls)`);
+        check(!calls.some((call) => call.method === "PUT"), "page bridge wrote a subscription block");
         check(
           !calls.some((call) => call.url.includes("/api/blocks?type=user")),
-          "disabled linking still read subscription blocks"
+          "page bridge read subscription blocks"
         );
         check(
-          !calls.some((call) => call.method === "PUT"),
-          "disabled linking wrote a subscription block"
+          !calls.some((call) => call.url.endsWith("/api/userblock")),
+          "page bridge fetched the hidden-user list"
         );
 
+        globalThis.__bggHardBlockerStop();
+        check(window.fetch === originalFetch, "stop did not restore fetch after disabled option test");
         document.body.dataset.status = failures.length ? "fail" : "pass";
         document.body.dataset.report = JSON.stringify({ failures, calls });
-      }, 150);
+      })().catch((error) => {
+        document.body.dataset.status = "fail";
+        document.body.dataset.report = JSON.stringify({
+          failures: [...failures, error?.stack || String(error)]
+        });
+      });
     </script>
   </body>
 </html>

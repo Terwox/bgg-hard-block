@@ -10,16 +10,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 from pathlib import Path
-import signal
+import re
 import subprocess
 import tempfile
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 import websockets
+
+from chromium_process import (
+    background_process_kwargs,
+    stop_process_tree,
+    wait_for_debug_port,
+)
 
 
 THREAD_URL = (
@@ -27,29 +32,48 @@ THREAD_URL = (
     "someone-who-refuses-to-learn-or-teach-their-own-ga"
 )
 TEST_USERNAME = "Heavenraiser"
-
-
-def wait_for_file(path: Path, process: subprocess.Popen[bytes], timeout: float = 10) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"Chromium exited early with status {process.returncode}")
-        if path.exists():
-            return
-        time.sleep(0.05)
-    raise TimeoutError(f"Timed out waiting for {path}")
-
-
-def debug_port(profile_dir: Path, process: subprocess.Popen[bytes]) -> int:
-    marker = profile_dir / "DevToolsActivePort"
-    wait_for_file(marker, process)
-    return int(marker.read_text(encoding="utf-8").splitlines()[0])
+EXTENSION_TARGET_PATHS = {
+    "/src/onboarding.html": ("page", 0),
+    "/src/background.js": ("service_worker", 1),
+}
+EXTENSION_ID_PATTERN = re.compile(r"[a-p]{32}")
 
 
 def open_target(port: int, url: str) -> str:
     endpoint = f"http://127.0.0.1:{port}/json/new?{quote(url, safe=':/?&=#')}"
     with urlopen(Request(endpoint, method="PUT"), timeout=5) as response:
         return json.load(response)["webSocketDebuggerUrl"]
+
+
+def devtools_targets(port: int) -> list[dict[str, object]]:
+    endpoint = f"http://127.0.0.1:{port}/json/list"
+    with urlopen(endpoint, timeout=2) as response:
+        targets = json.load(response)
+    return targets if isinstance(targets, list) else []
+
+
+def extension_id_from_targets(targets: list[dict[str, object]]) -> str | None:
+    """Select this extension from exact known resource targets only."""
+    candidates: dict[int, set[str]] = {}
+    for target in targets:
+        parsed = urlparse(str(target.get("url", "")))
+        expected = EXTENSION_TARGET_PATHS.get(parsed.path)
+        if (
+            parsed.scheme != "chrome-extension"
+            or not parsed.hostname
+            or EXTENSION_ID_PATTERN.fullmatch(parsed.hostname) is None
+            or expected is None
+            or target.get("type") != expected[0]
+        ):
+            continue
+        candidates.setdefault(expected[1], set()).add(parsed.hostname)
+
+    for priority in sorted(candidates):
+        identifiers = candidates[priority]
+        if len(identifiers) == 1:
+            return next(iter(identifiers))
+        return None
+    return None
 
 
 async def evaluate(websocket, counter: int, expression: str) -> tuple[int, object]:
@@ -100,6 +124,7 @@ async def seed_cached_block_list(websocket_url: str) -> None:
         expression = f"""
           chrome.storage.local.set({{
             bggHardBlockerState: {{
+              schemaVersion: 1,
               usernames: [{json.dumps(TEST_USERNAME)}],
               status: {{ lastSync: '2026-08-04T00:00:00.000Z' }}
             }}
@@ -153,30 +178,23 @@ async def grant_consent(websocket_url: str) -> None:
 
 
 async def find_extension_id(port: int) -> str:
-    websocket_url = open_target(port, "chrome://extensions/")
-    expression = """
-      (() => {
-        const manager = document.querySelector('extensions-manager');
-        const list = manager?.shadowRoot?.querySelector('extensions-item-list');
-        const items = [...(list?.shadowRoot?.querySelectorAll('extensions-item') || [])];
-        return items.map((item) => ({
-          id: item.getAttribute('id') || item.data?.id || '',
-          name: item.shadowRoot?.querySelector('#name')?.textContent?.trim() || item.data?.name || ''
-        }));
-      })()
-    """
-
-    async with websockets.connect(websocket_url, max_size=2_000_000) as websocket:
-        counter = 0
-        deadline = asyncio.get_running_loop().time() + 10
-        while asyncio.get_running_loop().time() < deadline:
-            counter, items = await evaluate(websocket, counter, expression)
-            for item in items or []:
-                if item.get("name") == "BGG Hard Block" and item.get("id"):
-                    return item["id"]
+    deadline = asyncio.get_running_loop().time() + 10
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            targets = devtools_targets(port)
+        except (OSError, ValueError):
             await asyncio.sleep(0.1)
+            continue
+        identifier = extension_id_from_targets(targets)
+        if identifier:
+            return identifier
+        await asyncio.sleep(0.1)
 
-    raise TimeoutError("Could not find BGG Hard Block on chrome://extensions")
+    raise TimeoutError(
+        "Could not find BGG Hard Block in the DevTools target list; use "
+        "Chromium or Chrome for Testing because branded Chrome ignores "
+        "unpacked-extension command-line flags"
+    )
 
 
 async def read_page_time_origin(websocket_url: str) -> float:
@@ -329,17 +347,6 @@ async def read_extension_status(websocket_url: str) -> dict[str, object]:
         return latest
 
 
-def stop_process_group(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    os.killpg(process.pid, signal.SIGTERM)
-    try:
-        process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=3)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--chrome", required=True)
@@ -370,11 +377,11 @@ def main() -> int:
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            **background_process_kwargs(),
         )
 
         try:
-            port = debug_port(profile_dir, process)
+            port = wait_for_debug_port(profile_dir, process)
             identifier = asyncio.run(find_extension_id(port))
             extension_ws = open_target(
                 port, f"chrome-extension://{identifier}/src/onboarding.html"
@@ -393,7 +400,7 @@ def main() -> int:
                 fallback = asyncio.run(run_observed_markup_fallback(thread_ws))
             status = asyncio.run(read_extension_status(extension_ws))
         finally:
-            stop_process_group(process)
+            stop_process_tree(process)
 
     failures = []
     consent_refresh = (

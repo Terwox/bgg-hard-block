@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Combined startup failure reveal test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      const startedAt = performance.now();
+      globalThis.chrome = {
+        runtime: {
+          async sendMessage() {
+            throw new Error("simulated bridge failure");
+          }
+        },
+        storage: {
+          local: {
+            async get(key) {
+              if (key === "bggHardBlockerConsent") {
+                return {
+                  bggHardBlockerConsent: {
+                    granted: true,
+                    disclosureVersion: "2026-08-15"
+                  }
+                };
+              }
+              throw new Error("simulated cache failure");
+            },
+            async set() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <p>Page content remains available when both startup inputs fail.</p>
+    <script>
+      const poll = setInterval(() => {
+        if (!document.documentElement.hasAttribute("data-bgg-hard-blocker-ready")) {
+          return;
+        }
+
+        clearInterval(poll);
+        const elapsed = performance.now() - startedAt;
+        const failures = [];
+        if (elapsed >= 400) {
+          failures.push(`combined failure waited for the 500 ms deadline (${elapsed.toFixed(1)} ms)`);
+        }
+        if (getComputedStyle(document.body).visibility !== "visible") {
+          failures.push("page remained visually hidden after reveal");
+        }
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, elapsed });
+      }, 10);
+    </script>
+  </body>
+</html>

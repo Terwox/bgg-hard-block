@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Authorization capture bridge security test</title>
+    <script>
+      const pageCalls = [];
+      const originalFetch = async (input, init = {}) => {
+        pageCalls.push({
+          url: String(input instanceof Request ? input.url : input),
+          method: String(init.method || input?.method || "GET").toUpperCase()
+        });
+        return new Response(JSON.stringify({
+          status: "error",
+          authorization: "page-owned-fake",
+          usernames: ["Injected User"],
+          profileCache: { 7: { username: "Injected User" } },
+          subscriptionLinking: { state: "synced" }
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      };
+      window.fetch = originalFetch;
+    </script>
+    <script src="../src/page-bridge.js"></script>
+  </head>
+  <body data-status="running">
+    <script>
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      const originalXhrOpen = XMLHttpRequest.prototype.open;
+      const originalXhrSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+
+      async function expectPending(promise, message) {
+        const state = await Promise.race([
+          promise.then(() => "settled"),
+          wait(20).then(() => "pending")
+        ]);
+        check(state === "pending", message);
+      }
+
+      async function runRejectedHeaderScenario() {
+        const resultPromise = installBggBlockListBridge({ allowFileFixture: true, channelNonce: "b".repeat(32) });
+
+        await fetch("https://evil.example/api/thread/1", {
+          headers: { Authorization: "GeekAuth off-origin" }
+        });
+        await fetch("https://api.geekdo.com.evil.example/api/thread/1", {
+          headers: { Authorization: "GeekAuth deceptive-origin" }
+        });
+        await fetch(":not-a-url", {
+          headers: { Authorization: "GeekAuth malformed-url" }
+        });
+        await fetch("https://api.geekdo.com/api/thread/1", {
+          headers: { Authorization: "Bearer wrong-scheme" }
+        });
+        await fetch("https://api.geekdo.com/api/thread/1", {
+          headers: { Authorization: "GeekAuth control\nvalue" }
+        });
+        await fetch("https://api.geekdo.com/api/thread/1", {
+          headers: { Authorization: "GeekAuth " + "x".repeat(8192) }
+        });
+        await fetch("https://api.geekdo.com/api/thread/1", {
+          headers: {
+            get() {
+              throw new Error("page-owned malformed headers");
+            }
+          }
+        });
+        await expectPending(resultPromise, "invalid origin or header settled the private waiter");
+
+        const authorization = "GeekAuth accepted-after-rejections";
+        await fetch("https://api.geekdo.com/api/thread/1", {
+          headers: { Authorization: authorization }
+        });
+        const result = await resultPromise;
+        check(
+          JSON.stringify(Object.keys(result).sort()) ===
+            JSON.stringify(["authorization", "status"]),
+          "accepted result exposed page-controlled response fields"
+        );
+        check(result.authorization === authorization, "valid authorization was not captured");
+        check(!("usernames" in result), "page-controlled usernames entered the private result");
+        check(!("profileCache" in result), "page-controlled cache entered the private result");
+        check(!("subscriptionLinking" in result), "page-controlled status entered the private result");
+        check(!pageCalls.some((call) => call.method === "PUT"), "hostile response induced a PUT");
+        check(
+          XMLHttpRequest.prototype.setRequestHeader === originalXhrSetRequestHeader,
+          "one-shot XMLHttpRequest header hook survived authorization capture"
+        );
+        let postCaptureHeaderReads = 0;
+        const postCaptureHeaders = new Proxy(
+          { Authorization: "GeekAuth must-not-be-inspected" },
+          {
+            get(target, property, receiver) {
+              postCaptureHeaderReads += 1;
+              return Reflect.get(target, property, receiver);
+            }
+          }
+        );
+        await fetch("https://api.geekdo.com/api/thread/after-capture", {
+          headers: postCaptureHeaders
+        });
+        check(postCaptureHeaderReads === 0, "fetch wrapper inspected headers after one-shot capture");
+        let postCaptureInitHeaderReads = 0;
+        const postCaptureInit = new Proxy(
+          { headers: { Authorization: "GeekAuth must-not-be-inspected" } },
+          {
+            get(target, property, receiver) {
+              if (property === "headers") postCaptureInitHeaderReads += 1;
+              return Reflect.get(target, property, receiver);
+            }
+          }
+        );
+        await fetch("https://api.geekdo.com/api/thread/after-capture-init", postCaptureInit);
+        check(
+          postCaptureInitHeaderReads === 0,
+          "fetch wrapper read init.headers after one-shot capture"
+        );
+        let mutationRevoked = false;
+        const mutationEvent = `bgg-hard-blocker:native-userblock-mutation:${"b".repeat(32)}`;
+        const observeMutation = () => { mutationRevoked = true; };
+        document.addEventListener(mutationEvent, observeMutation);
+        await fetch("https://api.geekdo.com/api/userblock", { method: "POST" });
+        document.removeEventListener(mutationEvent, observeMutation);
+        check(mutationRevoked, "native mutation start did not emit the revocation-only signal");
+        globalThis.__bggHardBlockerStop();
+      }
+
+      async function runDuplicateInstallScenario() {
+        const firstPromise = installBggBlockListBridge({ allowFileFixture: true, channelNonce: "b".repeat(32) });
+        const secondPromise = installBggBlockListBridge({ allowFileFixture: true, channelNonce: "b".repeat(32) });
+        const firstResult = await firstPromise;
+        check(
+          firstResult.status === "error" && firstResult.reason === "cancelled",
+          "duplicate install did not cancel the prior waiter"
+        );
+
+        const authorization = "GeekAuth duplicate-install-winner";
+        await fetch("https://api.geekdo.com/api/thread/2", {
+          headers: { Authorization: authorization }
+        });
+        const secondResult = await secondPromise;
+        check(secondResult.authorization === authorization, "replacement waiter did not capture authorization");
+        globalThis.__bggHardBlockerStop();
+      }
+
+      async function runXhrCaptureScenario() {
+        const resultPromise = installBggBlockListBridge({ allowFileFixture: true, channelNonce: "b".repeat(32) });
+        const authorization = "GeekAuth xhr-capture";
+        const request = new XMLHttpRequest();
+        request.open("GET", "https://api.geekdo.com/api/thread/3");
+        request.setRequestHeader("Authorization", authorization);
+        const result = await resultPromise;
+        check(result.authorization === authorization, "XMLHttpRequest authorization was not captured");
+        globalThis.__bggHardBlockerStop();
+      }
+
+      async function runStopCancellationScenario() {
+        const resultPromise = installBggBlockListBridge({ allowFileFixture: true, channelNonce: "b".repeat(32) });
+        globalThis.__bggHardBlockerStop();
+        const result = await resultPromise;
+        check(
+          result.status === "error" && result.reason === "cancelled",
+          "stop did not cancel the pending authorization waiter"
+        );
+        check(window.fetch === originalFetch, "stop did not restore the exact fetch function");
+        check(
+          XMLHttpRequest.prototype.open === originalXhrOpen,
+          "stop did not restore the exact XMLHttpRequest.open function"
+        );
+        check(
+          XMLHttpRequest.prototype.setRequestHeader === originalXhrSetRequestHeader,
+          "stop did not restore the exact XMLHttpRequest.setRequestHeader function"
+        );
+      }
+
+      (async () => {
+        await runRejectedHeaderScenario();
+        await runDuplicateInstallScenario();
+        await runXhrCaptureScenario();
+        await runStopCancellationScenario();
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          pageCallCount: pageCalls.length
+        });
+      })().catch((error) => {
+        document.body.dataset.status = "fail";
+        document.body.dataset.report = JSON.stringify({
+          failures: [...failures, error?.stack || String(error)]
+        });
+      });
+    </script>
+  </body>
+</html>

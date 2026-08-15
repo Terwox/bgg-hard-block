@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Deferred subscription status UI test</title>
+  </head>
+  <body data-status="running">
+    <section aria-label="Options fixture">
+      <input id="link-subscription-blocks" type="checkbox">
+      <button id="complete-setup" type="button" hidden>Complete setup</button>
+      <p id="save-status"></p>
+      <p id="sync-status"></p>
+    </section>
+
+    <section aria-label="Popup fixture">
+      <span id="blocked-count"></span>
+      <span id="name-count"></span>
+      <button id="open-options" type="button">Options</button>
+      <span id="post-count"></span>
+      <span id="quote-count"></span>
+      <span id="state"></span>
+      <span id="subscription-state"></span>
+      <p id="subscription-note"></p>
+    </section>
+
+    <script>
+      const innerHtmlWrites = [];
+      const innerHtmlDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+      Object.defineProperty(Element.prototype, "innerHTML", {
+        configurable: true,
+        get: innerHtmlDescriptor.get,
+        set(value) {
+          innerHtmlWrites.push(String(value));
+          innerHtmlDescriptor.set.call(this, value);
+        }
+      });
+
+      const subscriptionState = { state: "error", deferred: true };
+      const stored = {
+        bggHardBlockerConsent: {
+          granted: true,
+          disclosureVersion: "2026-08-15"
+        },
+        bggHardBlockerOptions: { linkSubscriptionBlocks: true },
+        bggHardBlockerSubscriptionState: subscriptionState
+      };
+
+      globalThis.chrome = {
+        runtime: {
+          getManifest() {
+            return { version: "0.4.0" };
+          }
+        },
+        storage: {
+          local: {
+            async get() {
+              return stored;
+            },
+            async set() {}
+          },
+          onChanged: {
+            addListener() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/options.js"></script>
+    <script src="../src/popup.js"></script>
+    <script>
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+
+      setTimeout(() => {
+        const optionsStatus = document.getElementById("sync-status").textContent;
+        const popupState = document.getElementById("subscription-state").textContent;
+        const popupNote = document.getElementById("subscription-note").textContent;
+
+        check(
+          optionsStatus.includes("BGG’s native Hidden Users changed"),
+          "options did not explain that native Hidden Users changed"
+        );
+        check(
+          /subscription linking paused/i.test(optionsStatus),
+          "options did not say that subscription linking paused"
+        );
+        check(
+          /retry on the next supported discussion page load/i.test(optionsStatus),
+          "options did not identify the next supported discussion-page retry"
+        );
+
+        check(popupState === "Paused", `popup state was ${JSON.stringify(popupState)}`);
+        check(
+          popupNote.includes("BGG’s native Hidden Users changed"),
+          "popup did not explain that native Hidden Users changed"
+        );
+        check(
+          /retry on the next supported discussion page load/i.test(popupNote),
+          "popup did not identify the next supported discussion-page retry"
+        );
+        check(!/error/i.test(popupState), "popup labeled a deferred state as an error");
+        check(
+          !/failed|failure/i.test(popupNote),
+          "popup used a generic linking-failure note for a deferred state"
+        );
+        check(innerHtmlWrites.length === 0, "UI status rendering wrote through innerHTML");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          optionsStatus,
+          popupState,
+          popupNote,
+          innerHtmlWrites
+        });
+      }, 0);
+    </script>
+  </body>
+</html>
