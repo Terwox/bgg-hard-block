@@ -31,13 +31,14 @@ def background_process_kwargs() -> dict[str, Any]:
 def wait_for_debug_port(
     profile_dir: Path,
     process: subprocess.Popen[bytes],
-    timeout: float = 10,
+    timeout: float = 30,
 ) -> int:
     """Wait until Chromium's DevTools port marker is complete and readable.
 
     On Windows the marker can briefly exist while Chromium still has it locked,
-    so existence alone is not readiness. Retry transient read and parse failures
-    while continuing to fail immediately if Chromium exits.
+    and a cold hosted runner can take more than ten seconds to create it. Retry
+    transient read and parse failures while continuing to fail immediately if
+    Chromium exits.
     """
     marker = profile_dir / "DevToolsActivePort"
     deadline = time.monotonic() + timeout
