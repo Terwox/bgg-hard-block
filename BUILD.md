@@ -53,7 +53,7 @@ it breaks everything below.
 
 Continuous integration (CI) independently builds the allowlisted ZIP on
 `windows-2025` and `ubuntu-24.04`, then compares the archive bytes. It uses
-Python 3.12.11 and Node.js 24.19.0; every GitHub Action is pinned by full commit
+Python 3.12.10 and Node.js 24.19.0; every GitHub Action is pinned by full commit
 SHA. The test job installs `requirements-dev.txt` with `--require-hashes`.
 
 Each tagged release records its expected SHA-256 in the release notes.
