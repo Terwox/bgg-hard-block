@@ -44,7 +44,7 @@ and authenticated API compatibility therefore remain unverified.
 | Reveal and CSS failure behavior | Reveal state mixed cache, bridge, and status concerns, and the CSS-only attachment failsafe did not hide during its delay before revealing at two seconds. | Explicit cache, bridge, list-revision, and reveal states gate first paint. The CSS fix separates the running-script hold and uses backwards-and-forwards animation fill with an explicit hidden first keyframe. Dedicated failure and failsafe fixtures verify pre-attachment hiding, two-second reveal, bounded script failure reveal, and quarantine behavior. |
 | SPA scope | Supported-to-unsupported route changes could leave filtering behavior, attributes, CSS, or late responses active; reentry could race teardown. | Background route tasks are ordered per tab, leaving scope aborts tab synchronization and tears down MAIN and isolated worlds, late responses remain inert, and supported reentry waits before reinjection. Initial unsupported injection, teardown/reentry, and route-persistence rollback are tested. The same-document smoke now calls `window.stop()` to freeze any in-flight Cloudflare challenge before its synthetic `history.pushState`, making the route assertion deterministic without treating the challenge page as current-markup evidence. |
 | Storage and retention | The profile cache lived in BGG-origin storage, public storage descriptions were incomplete, unversioned content state could be trusted across incompatible implementations, and status unnecessarily retained the full discussion URL. | The cache moved to `chrome.storage.local`; entries older than 30 days are never reused, and the next successful synchronization removes them, prunes IDs no longer in the current Hidden Users result, and removes the obsolete origin-storage entry. Content state now writes `schemaVersion: 1`; reads reject legacy state, install or consent migration removes it, and regressions prove that only background-owned canonical usernames plus status are persisted while the full active page URL is checked only in memory and never retained. `PRIVACY.md` enumerates all five extension-storage records. |
-| Release and helper tooling | Packaging admitted directory-derived input and did not prove Windows/Linux byte identity; Chromium cleanup was POSIX-specific, and transient Windows locking of `DevToolsActivePort` could fail an otherwise healthy browser run. | Packaging now uses a tracked-file allowlist, fixed stored ZIP metadata, LF normalization, hash-locked test tooling, commit-SHA-pinned actions, and a cross-platform CI comparison. Shared process helpers hide Chromium on Windows, terminate its process tree on both platforms, and retry the debug-port marker while failing promptly if Chromium exits. |
+| Release and helper tooling | Packaging admitted directory-derived input and did not prove Windows/Linux byte identity; Chromium cleanup was POSIX-specific, and transient Windows locking or a slow hosted cold start of `DevToolsActivePort` could fail an otherwise healthy browser run. | Packaging now uses a tracked-file allowlist, fixed stored ZIP metadata, LF normalization, hash-locked test tooling, commit-SHA-pinned actions, and a cross-platform CI comparison. Shared process helpers hide Chromium on Windows, terminate its process tree on both platforms, and allow a bounded hosted cold start while retrying the debug-port marker and still failing promptly if Chromium exits. Hosted CI run 31911735766 passed Linux extension checks, Windows packaging, and byte-for-byte Windows/Linux comparison. |
 
 ## Performance evidence
 
@@ -83,9 +83,10 @@ only status self-registration, and the same-document SPA smoke passed after
 stopping an in-flight Cloudflare challenge before synthetic `history.pushState`.
 These runs used temporary headless Chromium. The fallback result does not
 establish current live markup compatibility, and neither smoke establishes
-authenticated API behavior. No Chrome Web Store artifact comparison, release
-publication, or hosted continuous integration (CI) result is part of this
-evidence.
+authenticated API behavior. Hosted continuous integration (CI) run 31911735766
+also passed Linux extension checks, Windows packaging, and byte-for-byte
+Windows/Linux package comparison. No Chrome Web Store artifact comparison or
+release publication is part of this evidence.
 
 ## Recommendation traceability and ranking
 
@@ -112,7 +113,7 @@ not certainty about future BGG behavior.
 | 13 | Review content and bridge readability | Reveal state is explicit; page-bridge scope is credential capture plus revocation-only native-mutation observation, not API processing; one-shot credential state is lexically separated from long-lived mutation wrappers; mutation logic is named; and duplicated settings-bridge code was removed. Worker complexity remains a maintenance risk. | Implemented | 3 | 4 | 5 | 2 | 3 | 4 |
 | 14 | Enumerate writes and reconcile retention | Five extension-storage records are documented and source-traceable. The background worker owns canonical usernames and synchronization metadata; content, including cache-only signed-out pages, can report only bounded page counters after exact session registration. Credentials and drafts are excluded, and the full active page URL is checked only in memory and never retained. Cache entries older than 30 days are never reused; the next successful sync removes them and non-current IDs. Content state writes schema 1, rejects legacy values, removes them on install or consent migration, and has three-tab stale-writer plus generation-, consent-, navigation-, and failure-rollback coverage. | Implemented | 4 | 5 | 5 | 2 | 4 | 4 |
 | 15 | Check user and maintainer documentation for drift | README, privacy, security, build, store, onboarding, and contributor guidance were updated. The fallback smoke does not substantiate current-live-markup or authenticated-API claims. | Partial | 3 | 4 | 5 | 1 | 2 | 3 |
-| 16 | Audit CI, packaging, hashes, and provenance | Allowlisted deterministic packaging and release tests pass locally; CI pins toolchains/actions and compares Windows/Linux bytes. Hosted CI execution is not locally proven. | Implemented | 4 | 4 | 4 | 1 | 3 | 4 |
+| 16 | Audit CI, packaging, hashes, and provenance | Allowlisted deterministic packaging and release tests pass locally; CI pins toolchains/actions, and hosted run 31911735766 passed Linux checks plus byte-for-byte Windows/Linux package comparison. Store-upload provenance remains a release gate. | Implemented; store provenance remains | 4 | 5 | 4 | 1 | 3 | 4 |
 | 17 | Produce a gap-driven regression plan | The highest-risk gaps became 106 background-worker tests, 17 browser fixtures, and 12 release-tooling tests, including adversarial and post-settlement bridge access, consent, schema, request and response budgets, subscription, FIFO timing and concurrency, cache-only exact-session races, stale-writer prevention, exact rollback, native mutation, deferred UI, relay teardown, tab cleanup, CSS failure, removal-only mutation, browser-process reliability, and performance cases. | Implemented | 5 | 5 | 4 | 3 | 3 | 5 |
 | 18 | Merge, separate, and rank audit outputs | Verified fixes, measured evidence, residual hypotheses, and ranked recommendations are consolidated here. | Implemented | 2 | 5 | 5 | 1 | 1 | 2 |
 
@@ -128,16 +129,15 @@ validation produces evidence.
 | 3 | Matcher behavior outside the concrete locale, homoglyph, malformed, and 1 MiB cases may contain unknown bypasses or overmatches. | The named adversarial cases pass, but no systematic property or fuzz corpus defines the wider input space. | Add bounded property and fuzz cases with explicit identity semantics and runtime budgets before changing matcher behavior. |
 | 4 | Six concurrent cold-cache profile requests may still trigger real BGG throttling or poor latency for large block lists. | The concurrency ceiling is unit-tested, but no live rate-limit envelope or supported batch endpoint was established. | Measure representative cold-cache lists against documented or observed service limits; reduce concurrency or adopt a documented batch endpoint only if evidence supports it. |
 | 5 | Production memory may grow during repeated route changes despite a reported zero heap delta. | `performance.memory` was quantized to zero in the benchmark environment. | Use precise memory instrumentation or repeated heap snapshots across many route cycles and compare retained nodes after garbage collection. |
-| 6 | Cross-platform package identity or store provenance may fail outside the local tooling test. | Local tests prove deterministic generation twice, not an executed Windows/Linux CI comparison or the bytes uploaded to the store. | Require a green hosted cross-platform comparison, publish the release SHA-256, and compare it with the downloaded Web Store artifact. |
+| 6 | Store provenance may diverge from the verified release artifact. | Hosted CI proved Windows/Linux package identity, but no artifact has yet been uploaded to or downloaded from the Chrome Web Store for comparison. | Publish the release SHA-256, upload that exact ZIP, and compare it with the downloaded Web Store artifact. |
 | 7 | Real-network warm-cache, cold-cache, signed-out, and slow-auth reveal timing may differ from fixtures. | The reveal state machine is fixture-tested, but network and production-render timing were not measured. | Capture those scenarios on current BGG with the same reveal, filtering, and blocked-content-flash metrics before setting tighter production budgets. |
 
 ## Stop condition
 
-The merged audit is complete for repository code, controlled fixtures, and
-local release tooling. Only that local evidence belongs to this audit. The
-maintainer retains release ownership: obtain a green hosted CI run, create and
-sign off the release artifact and SHA-256, upload the exact artifact, and
-compare the downloaded store bytes. Live authenticated API and current-markup
-compatibility, precise memory behavior, real rate limiting, hosted CI
-reproducibility, release publication, and store-artifact provenance remain
-explicit validation work; none is claimed as verified here.
+The merged audit is complete for repository code, controlled fixtures, local
+release tooling, and hosted cross-platform CI. The maintainer retains release
+ownership: create and sign off the release artifact and SHA-256, upload the
+exact artifact, and compare the downloaded store bytes. Live authenticated API
+and current-markup compatibility, precise memory behavior, real rate limiting,
+release publication, and store-artifact provenance remain explicit validation
+work; none is claimed as verified here.
