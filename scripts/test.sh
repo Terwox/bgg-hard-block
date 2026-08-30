@@ -42,7 +42,7 @@ node "$repo_dir/tests/background.test.js"
 node "$repo_dir/tests/manifest-scope.test.js"
 python3 "$repo_dir/tests/test_release_tooling.py"
 
-for fixture in dom-filter consent-gate onboarding page-bridge page-bridge-security subscription-linking-disabled ui-deferred-status content-runtime mixed-version-runtime lazy-content-runtime cache-hold content-mutation-performance content-reveal-failure bridge-trust-runtime content-large-thread-performance spa-scope-teardown css-failsafe; do
+for fixture in dom-filter consent-gate onboarding page-bridge page-bridge-security subscription-linking-disabled ui-deferred-status content-runtime mixed-version-runtime lazy-content-runtime cache-hold content-mutation-performance content-reveal-failure bridge-trust-runtime content-large-thread-performance spa-scope-teardown css-failsafe live-angular-quote; do
   python3 "$repo_dir/scripts/browser_test.py" \
     --chrome "$chrome_bin" \
     "$repo_dir/tests/$fixture.html"
