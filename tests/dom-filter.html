@@ -76,6 +76,16 @@
               <div class="c-header"><span class="user-attribution">@Muted User wrote:</span></div>
               <gg-markup-content>Blocked current-markup quotation</gg-markup-content>
             </gg-markup-quote>
+            <gg-markup-quote id="blocked-split-attribution-quote">
+              <div class="c-header">
+                <gg-user-attribution>
+                  <span class="user-attribution">
+                    <span>Muted Display Name</span><span>@Muted User</span>
+                  </span>
+                </gg-user-attribution>
+              </div>
+              <gg-markup-content>Blocked live split-attribution quotation</gg-markup-content>
+            </gg-markup-quote>
             <gg-markup-quote id="anonymous-outer-quote">
               <div class="c-header"><span class="user-attribution"></span></div>
               <gg-markup-content>
@@ -166,7 +176,7 @@
       };
 
       check(result.posts === 3, `expected 3 removed posts, got ${result.posts}`);
-      check(result.quotes === 2, `expected 2 removed quotes, got ${result.quotes}`);
+      check(result.quotes === 3, `expected 3 removed quotes, got ${result.quotes}`);
       check(
         result.profileNames === 3,
         `expected 3 redacted profile names, got ${result.profileNames}`
@@ -189,6 +199,10 @@
         "BGG's explicit no-author quotation was not recognized as ready"
       );
       check(!document.getElementById("blocked-wrote-quote"), "@handle wrote quote remains");
+      check(
+        !document.getElementById("blocked-split-attribution-quote"),
+        "live split-attribution quote remains"
+      );
       const anonymousQuote = document.getElementById("anonymous-outer-quote");
       check(Boolean(anonymousQuote), "anonymous outer quotation was removed");
       check(

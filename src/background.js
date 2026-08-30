@@ -26,6 +26,7 @@ const MAX_SYNC_RESPONSE_BYTES = 16 * 1024 * 1024;
 // Relay/capture gets 5 seconds; FIFO wait plus trusted sync share a subsequent 20-second deadline.
 const MAIN_CAPTURE_DEADLINE_MS = 5000;
 const SYNC_DEADLINE_MS = 20000;
+const RECENT_AUTHORIZATION_MAX_AGE_MS = 5000;
 
 const LOADED_EXTENSION_VERSION = chrome.runtime.getManifest?.().version || "";
 const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION) ? "2026-08-04"
@@ -489,8 +490,139 @@ let linkingSuspendedThroughGeneration = 0;
 let linkingQuiescentAfter = 0;
 const mutationRelaySessions = new Map();
 const contentStatusSessions = new Map();
+const recentAuthorizations = new Map();
+const authorizationWaiters = new Map();
+
+function authorizationDocumentKey(tabId, documentId) {
+  return `${tabId}:${documentId}`;
+}
+
+function clearObservedAuthorizations(tabId = null) {
+  const prefix = tabId === null ? "" : `${tabId}:`;
+  for (const [key, record] of recentAuthorizations) {
+    if (!prefix || key.startsWith(prefix)) {
+      clearTimeout(record.expirationTimer);
+      recentAuthorizations.delete(key);
+    }
+  }
+  for (const [key, waiter] of authorizationWaiters) {
+    if (!prefix || key.startsWith(prefix)) {
+      authorizationWaiters.delete(key);
+      waiter.resolve("");
+    }
+  }
+}
+
+function observedAuthorization(details) {
+  if (
+    details?.initiator !== "https://boardgamegeek.com" ||
+    !Number.isInteger(details?.tabId) ||
+    details.tabId < 0 ||
+    details?.frameId !== 0 ||
+    typeof details?.documentId !== "string" ||
+    !details.documentId
+  ) {
+    return;
+  }
+
+  let url;
+  try {
+    url = new URL(details.url);
+  } catch (_error) {
+    return;
+  }
+  if (
+    url.origin !== API_ORIGIN ||
+    url.username ||
+    url.password ||
+    !(url.pathname === "/api" || url.pathname.startsWith("/api/"))
+  ) {
+    return;
+  }
+
+  const captureRevision = authorizationRevision;
+  Promise.all([
+    chrome.storage.local.get(CONSENT_KEY),
+    chrome.tabs.get(details.tabId)
+  ])
+    .then(([stored, tab]) => {
+      if (
+        captureRevision !== authorizationRevision ||
+        !hasCurrentConsent(stored?.[CONSENT_KEY]) ||
+        (typeof tab?.pendingUrl === "string" && tab.pendingUrl.length > 0) ||
+        !isDiscussionUrl(tab?.url)
+      ) {
+        return;
+      }
+      const header = Array.isArray(details.requestHeaders)
+        ? details.requestHeaders.find(
+            (entry) => String(entry?.name || "").toLowerCase() === "authorization"
+          )
+        : null;
+      const authorization = normalizeAuthorization(header?.value);
+      if (!authorization) return;
+      deliverObservedAuthorization(details, authorization);
+    })
+    .catch(() => {});
+}
+
+function deliverObservedAuthorization(details, authorization) {
+  const key = authorizationDocumentKey(details.tabId, details.documentId);
+  const waiter = authorizationWaiters.get(key);
+  if (waiter) {
+    authorizationWaiters.delete(key);
+    waiter.resolve(authorization);
+    return;
+  }
+
+  const previous = recentAuthorizations.get(key);
+  if (previous) clearTimeout(previous.expirationTimer);
+  const record = {
+    authorization,
+    capturedAt: Date.now(),
+    expirationTimer: 0
+  };
+  record.expirationTimer = setTimeout(() => {
+    if (recentAuthorizations.get(key) === record) recentAuthorizations.delete(key);
+  }, RECENT_AUTHORIZATION_MAX_AGE_MS);
+  recentAuthorizations.set(key, record);
+}
+
+function reserveObservedAuthorization(tabId, documentId) {
+  const key = authorizationDocumentKey(tabId, documentId);
+  const now = Date.now();
+  for (const [candidateKey, record] of recentAuthorizations) {
+    if (now - record.capturedAt > RECENT_AUTHORIZATION_MAX_AGE_MS) {
+      clearTimeout(record.expirationTimer);
+      recentAuthorizations.delete(candidateKey);
+    }
+  }
+
+  const recent = recentAuthorizations.get(key);
+  if (recent) {
+    clearTimeout(recent.expirationTimer);
+    recentAuthorizations.delete(key);
+    return {
+      promise: Promise.resolve(recent.authorization),
+      cancel() {}
+    };
+  }
+
+  let resolveAuthorization;
+  const promise = new Promise((resolve) => { resolveAuthorization = resolve; });
+  authorizationWaiters.set(key, { resolve: resolveAuthorization });
+  return {
+    promise,
+    cancel() {
+      if (authorizationWaiters.get(key)?.resolve === resolveAuthorization) {
+        authorizationWaiters.delete(key);
+      }
+    }
+  };
+}
 
 function clearTabDocumentSessions(tabId) {
+  clearObservedAuthorizations(tabId);
   for (const key of mutationRelaySessions.keys()) {
     if (key.startsWith(`${tabId}:`)) mutationRelaySessions.delete(key);
   }
@@ -748,6 +880,7 @@ async function runBridgeSession(message, sender, generation, reservation) {
   let controller = null;
   let deadline = null;
   let timedOut = false;
+  let observedCapture = null;
   const startingAuthorizationRevision = authorizationRevision;
   const startingRouteRevision = tabRouteRevisions.get(tabId) || 0;
   try {
@@ -770,7 +903,8 @@ async function runBridgeSession(message, sender, generation, reservation) {
     let captureDeadline = null;
     let captureExpired = false;
     try {
-      injectionResults = await Promise.race([
+      observedCapture = reserveObservedAuthorization(tabId, documentId);
+      const captureResult = await Promise.race([
         (async () => {
           try {
             await chrome.scripting.executeScript({
@@ -787,11 +921,13 @@ async function runBridgeSession(message, sender, generation, reservation) {
             linkingQuiescentAfter = Number.POSITIVE_INFINITY;
           }
           if (captureExpired) throw new MainCaptureTimeoutError();
-          return chrome.scripting.executeScript({
+          injectionResults = await chrome.scripting.executeScript({
             target: { tabId, documentIds: [documentId] }, func: installBggBlockListBridge,
             args: [{ channelNonce: message.channelNonce }], world: "MAIN", injectImmediately: true
           });
+          return { source: "page", injectionResults };
         })(),
+        observedCapture.promise.then((observed) => ({ source: "network", observed })),
         new Promise((_resolve, reject) => {
           captureDeadline = setTimeout(() => {
             captureExpired = true;
@@ -799,27 +935,33 @@ async function runBridgeSession(message, sender, generation, reservation) {
           }, MAIN_CAPTURE_DEADLINE_MS);
         })
       ]);
+      if (captureResult.source === "network") {
+        authorization = normalizeAuthorization(captureResult.observed);
+      }
     } finally {
       if (captureDeadline !== null) clearTimeout(captureDeadline);
+      observedCapture?.cancel();
     }
     if ((tabRouteRevisions.get(tabId) || 0) !== startingRouteRevision) {
       contentStatusSessions.delete(`${tabId}:${documentId}`);
       stopBridgeSessionBestEffort(tabId, documentId);
       return { status: "error", reason: "stale-document" };
     }
-    if (!Array.isArray(injectionResults) || injectionResults.length !== 1 ||
-        injectionResults[0]?.frameId !== 0 || injectionResults[0]?.documentId !== documentId) {
-      contentStatusSessions.delete(`${tabId}:${documentId}`);
-      stopBridgeSessionBestEffort(tabId, documentId);
-      return { status: "error", reason: "stale-document" };
+    if (!authorization) {
+      if (!Array.isArray(injectionResults) || injectionResults.length !== 1 ||
+          injectionResults[0]?.frameId !== 0 || injectionResults[0]?.documentId !== documentId) {
+        contentStatusSessions.delete(`${tabId}:${documentId}`);
+        stopBridgeSessionBestEffort(tabId, documentId);
+        return { status: "error", reason: "stale-document" };
+      }
+      privateResult = injectionResults[0]?.result;
+      if (privateResult?.status !== "ready") {
+        stopBridgeSessionBestEffort(tabId, documentId);
+        return { status: "error", reason: privateResult?.reason === "authorization-unavailable"
+          ? "authorization-unavailable" : "sync-failed" };
+      }
+      authorization = normalizeAuthorization(privateResult.authorization);
     }
-    privateResult = injectionResults[0]?.result;
-    if (privateResult?.status !== "ready") {
-      stopBridgeSessionBestEffort(tabId, documentId);
-      return { status: "error", reason: privateResult?.reason === "authorization-unavailable"
-        ? "authorization-unavailable" : "sync-failed" };
-    }
-    authorization = normalizeAuthorization(privateResult.authorization);
     if (!authorization) {
       stopBridgeSessionBestEffort(tabId, documentId);
       return { status: "error", reason: "sync-failed" };
@@ -890,6 +1032,7 @@ async function runBridgeSession(message, sender, generation, reservation) {
     syncResult = null;
     writtenValues = null;
     writtenContentState = null;
+    observedCapture?.cancel();
     reservation.release();
   }
 }
@@ -945,6 +1088,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  observedAuthorization,
+  { urls: [`${API_ROOT}/*`], types: ["xmlhttprequest"] },
+  ["requestHeaders", "extraHeaders"]
+);
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   let invalidated = false;
   if (changeInfo.status === "loading") {
@@ -981,6 +1130,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || (!changes[CONSENT_KEY] && !changes[OPTIONS_KEY])) return;
+  if (changes[CONSENT_KEY]) {
+    clearObservedAuthorizations();
+  }
   authorizationRevision += 1;
   if (changes[CONSENT_KEY]) {
     contentStatusSessions.clear();

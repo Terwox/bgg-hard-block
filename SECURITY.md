@@ -53,7 +53,7 @@ Stated plainly, so you can check the claims against the source:
 
 | Data | Where it lives | Leaves the machine? |
 | --- | --- | --- |
-| `GeekAuth` authorization header | Ephemeral MAIN-world and background-worker memory | Only back to `api.geekdo.com`, which BGG's own frontend already sends it to |
+| `GeekAuth` authorization header | Ephemeral Chrome request-event, MAIN-world fallback, and background-worker memory | Only back to `api.geekdo.com`, which BGG's own frontend already sends it to |
 | Consent record | `chrome.storage.local`, `bggHardBlockerConsent` | No |
 | Subscription-linking option | `chrome.storage.local`, `bggHardBlockerOptions` | No |
 | Blocked usernames, result status, and counts | `chrome.storage.local`, `bggHardBlockerState` | No |
@@ -65,13 +65,13 @@ There is no developer-controlled server. There is no analytics, telemetry, or
 crash reporting of any kind.
 
 There is no declarative MAIN-world, settings, metadata, or data-bearing
-`CustomEvent` bridge. The isolated content script requests synchronization from
-the background worker, which validates the sender document and current
-authorization state before a document-bound MAIN-world capture. The captured
-value returns privately through `chrome.scripting.executeScript`; it never
-enters the response to content. Header inspection becomes inert after the first
-settled result, and the long-lived mutation-only wrappers retain no credential
-binding. The worker rechecks authorization before network
+`CustomEvent` bridge. After current consent, a read-only `webRequest` listener
+accepts authorization only from `api.geekdo.com/api/*` requests initiated by
+BoardGameGeek, after validating the active tab is on a supported discussion URL.
+Stored consent is checked for each candidate event before its header is read.
+Each value is bound to an exact tab/document, consumed once, and expires after
+five seconds. A document-bound MAIN-world capture remains as a private fallback;
+neither path exposes the value to content. The worker rechecks authorization before network
 work, before every irreversible subscription addition, and before persisting or
 returning public results. The worker owns and generation-orders the canonical
 cached username list; content documents can report only bounded page counters,

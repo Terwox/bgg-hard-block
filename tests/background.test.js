@@ -19,7 +19,7 @@ const listeners = {};
 const calls = {
   createdTabs: [], events: [], queries: [], reloads: [], cssInsertions: [],
   cssRemovals: [], scriptExecutions: [], storageGets: [], storageSets: [],
-  storageRemoves: [], fetches: []
+  storageRemoves: [], fetches: [], webRequestRegistrations: []
 };
 let stored = {};
 let storageGetter;
@@ -116,6 +116,14 @@ globalThis.chrome = {
       }
       return [];
     }
+  },
+  webRequest: {
+    onBeforeSendHeaders: {
+      addListener(fn, filter, extraInfoSpec) {
+        listeners.beforeSendHeaders = fn;
+        calls.webRequestRegistrations.push({ filter: clone(filter), extraInfoSpec: clone(extraInfoSpec) });
+      }
+    }
   }
 };
 
@@ -171,7 +179,9 @@ function defaultFetch(url, options) {
 }
 
 function reset() {
-  for (const values of Object.values(calls)) values.length = 0;
+  for (const [name, values] of Object.entries(calls)) {
+    if (name !== "webRequestRegistrations") values.length = 0;
+  }
   stored = defaultStored();
   storageGetter = undefined;
   storageSetter = undefined;
@@ -231,9 +241,129 @@ const tests = [];
 function test(name, body) { tests.push({ name, body }); }
 
 test("registers all background event listeners", () => {
-  for (const name of ["message", "installed", "storageChanged", "tabUpdated", "tabRemoved"]) {
+  for (const name of [
+    "message", "installed", "storageChanged", "tabUpdated", "tabRemoved", "beforeSendHeaders"
+  ]) {
     assert.equal(typeof listeners[name], "function");
   }
+  assert.deepEqual(calls.webRequestRegistrations, [{
+    filter: {
+      urls: ["https://api.geekdo.com/api/*"],
+      types: ["xmlhttprequest"]
+    },
+    extraInfoSpec: ["requestHeaders", "extraHeaders"]
+  }]);
+});
+
+test("uses an exact-document BGG API header when late MAIN-world capture misses", async () => {
+  const sender = validSender({ tab: { id: 42 }, documentId: "network-capture-document" });
+  injectionResult = () => new Promise(() => {});
+  const pending = sendBridge(validMessage(), sender);
+  await settle();
+
+  listeners.beforeSendHeaders({
+    url: "https://api.geekdo.com/api/thread/3477322",
+    initiator: "https://boardgamegeek.com",
+    tabId: sender.tab.id,
+    frameId: 0,
+    documentId: sender.documentId,
+    type: "xmlhttprequest",
+    requestHeaders: [{ name: "Authorization", value: TOKEN }]
+  });
+  await settle();
+
+  const outcome = await pending;
+  assert.equal(outcome.response.status, "ready");
+  assert.ok(calls.fetches.length > 0);
+  assert.ok(calls.fetches.every((call) => call.headers.Authorization === TOKEN));
+});
+
+test("retains a consent-authorized header observed before the bridge session starts", async () => {
+  const sender = validSender({ tab: { id: 44 }, documentId: "cold-worker-document" });
+  listeners.beforeSendHeaders({
+    url: "https://api.geekdo.com/api/thread/3477322",
+    initiator: "https://boardgamegeek.com",
+    tabId: sender.tab.id,
+    frameId: 0,
+    documentId: sender.documentId,
+    type: "xmlhttprequest",
+    requestHeaders: [{ name: "Authorization", value: TOKEN }]
+  });
+  await settle();
+
+  injectionResult = () => new Promise(() => {});
+  const outcome = await sendBridge(validMessage(), sender);
+  assert.equal(outcome.response.status, "ready");
+  assert.ok(calls.fetches.length > 0);
+  assert.ok(calls.fetches.every((call) => call.headers.Authorization === TOKEN));
+});
+
+test("does not inspect or retain an observed header without current consent", async () => {
+  const sender = validSender({ tab: { id: 45 }, documentId: "no-consent-network-document" });
+  stored = defaultStored({ [CONSENT_KEY]: undefined });
+  listeners.beforeSendHeaders({
+    url: "https://api.geekdo.com/api/thread/3477322",
+    initiator: "https://boardgamegeek.com",
+    tabId: sender.tab.id,
+    frameId: 0,
+    documentId: sender.documentId,
+    type: "xmlhttprequest",
+    requestHeaders: [{ name: "Authorization", value: TOKEN }]
+  });
+  await settle();
+
+  stored = defaultStored();
+  injectionResult = (options) => [{
+    frameId: 0,
+    documentId: options.target.documentIds[0],
+    result: readyResult({ authorization: "" })
+  }];
+  const outcome = await sendBridge(validMessage(), sender);
+  assert.equal(calls.fetches.length, 0);
+  assert.deepEqual(outcome.response, { status: "error", reason: "sync-failed" });
+});
+
+test("ignores observed authorization outside the exact BGG document and API origin", async () => {
+  const sender = validSender({ tab: { id: 43 }, documentId: "scoped-network-capture" });
+  injectionResult = () => new Promise(() => {});
+  const pending = sendBridge(validMessage(), sender);
+  await settle();
+
+  for (const overrides of [
+    { initiator: "https://evil.example" },
+    { url: "https://api.geekdo.com.evil.example/api/thread/1" },
+    { tabId: 99 },
+    { documentId: "other-document" },
+    { frameId: 1 },
+    { requestHeaders: [{ name: "Authorization", value: "Bearer wrong" }] }
+  ]) {
+    listeners.beforeSendHeaders({
+      url: "https://api.geekdo.com/api/thread/3477322",
+      initiator: "https://boardgamegeek.com",
+      tabId: sender.tab.id,
+      frameId: 0,
+      documentId: sender.documentId,
+      type: "xmlhttprequest",
+      requestHeaders: [{ name: "Authorization", value: TOKEN }],
+      ...overrides
+    });
+  }
+  await settle();
+  assert.equal(calls.fetches.length, 0);
+
+  listeners.beforeSendHeaders({
+    url: "https://api.geekdo.com/api/thread/3477322",
+    initiator: "https://boardgamegeek.com",
+    tabId: sender.tab.id,
+    frameId: 0,
+    documentId: sender.documentId,
+    type: "xmlhttprequest",
+    requestHeaders: [{ name: "authorization", value: TOKEN }]
+  });
+  await settle();
+  assert.equal((await pending).response.status, "ready");
+  listeners.tabRemoved(99);
+  listeners.tabRemoved(sender.tab.id);
 });
 
 test("returns false without responding to unrelated messages", async () => {
