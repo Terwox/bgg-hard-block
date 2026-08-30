@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Live BGG Angular quote-attribution test</title>
+  </head>
+  <body data-status="running">
+    <!--
+      Regression fixture built from BGG's real rendered markup, captured
+      2026-08-30 from a live discussion page. BGG renders quote attribution as
+      Angular web components: the display name and the @handle live in two
+      sibling spans inside .user-attribution, there is no literal "wrote:" in
+      the DOM, and the text node spacing is irregular (" Terence   @Trence ").
+      Earlier fixtures used hand-written approximations of this shape.
+    -->
+    <main id="fixture">
+      <gg-post id="reply-quoting-blocked">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Here2024">Here2024</a></header>
+          <div class="post-body">
+            <gg-markup-quote id="live-blocked-quote" _nghost-ng-c1392637832="">
+              <div _ngcontent-ng-c1392637832="">
+                <div _ngcontent-ng-c1392637832="" class="c-header">
+                  <gg-user-attribution _ngcontent-ng-c1392637832="">
+                    <gg-user-attribution-ui _nghost-ng-c3604873798="">
+                      <span _ngcontent-ng-c3604873798="" class="user-attribution tw-inline-flex tw-flex-wrap tw-items-baseline"
+                        ><span _ngcontent-ng-c3604873798="" class="tw-inline-block tw-max-w-[11em] tw-truncate tw-text-sm tw-font-bold tw-leading-tight md:tw-text-base md:tw-leading-tight"> Terence  <!----><!----></span
+                        ><span _ngcontent-ng-c3604873798="" class="tw-ml-1 tw-text-[0.8125rem] tw-leading-tight md:tw-text-sm md:tw-leading-tight"> @Trence </span
+                        ><!----></span>
+                    </gg-user-attribution-ui>
+                  </gg-user-attribution><!----><!----><!---->
+                </div>
+                <gg-markup-content _ngcontent-ng-c1392637832="">Quoted body from the blocked user.</gg-markup-content>
+              </div>
+            </gg-markup-quote>
+            <p id="surviving-reply">The reply itself must survive.</p>
+          </div>
+        </article>
+      </gg-post>
+
+      <gg-post id="reply-quoting-allowed">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Here2024">Here2024</a></header>
+          <div class="post-body">
+            <gg-markup-quote id="live-allowed-quote" _nghost-ng-c1392637832="">
+              <div _ngcontent-ng-c1392637832="">
+                <div _ngcontent-ng-c1392637832="" class="c-header">
+                  <gg-user-attribution _ngcontent-ng-c1392637832="">
+                    <gg-user-attribution-ui _nghost-ng-c3604873798="">
+                      <span _ngcontent-ng-c3604873798="" class="user-attribution tw-inline-flex tw-flex-wrap tw-items-baseline"
+                        ><span _ngcontent-ng-c3604873798=""> Leo Zappa  <!----><!----></span
+                        ><span _ngcontent-ng-c3604873798=""> @desertfox2004 </span
+                        ><!----></span>
+                    </gg-user-attribution-ui>
+                  </gg-user-attribution>
+                </div>
+                <gg-markup-content _ngcontent-ng-c1392637832="">Allowed quotation.</gg-markup-content>
+              </div>
+            </gg-markup-quote>
+          </div>
+        </article>
+      </gg-post>
+    </main>
+
+    <script src="../src/content-core.js"></script>
+    <script>
+      const failures = [];
+      const check = (condition, message) => { if (!condition) failures.push(message); };
+
+      // Blocked by @handle, which is how BGG's Hidden Users list stores it.
+      const result = BggHardBlockerCore.filterDom(document, ["Trence"]);
+
+      check(
+        !document.getElementById("live-blocked-quote"),
+        "live Angular quote attributed to the blocked handle was not removed"
+      );
+      check(
+        Boolean(document.getElementById("reply-quoting-blocked")),
+        "the surrounding reply was removed instead of just the quotation"
+      );
+      check(
+        Boolean(document.getElementById("surviving-reply")),
+        "the reply body was destroyed"
+      );
+      check(
+        Boolean(document.getElementById("live-allowed-quote")),
+        "an allowed quotation was removed"
+      );
+      check(result.quotes === 1, `expected 1 removed quote, got ${result.quotes}`);
+
+      document.body.dataset.status = failures.length ? "fail" : "pass";
+      document.body.dataset.failures = JSON.stringify(failures);
+    </script>
+  </body>
+</html>
