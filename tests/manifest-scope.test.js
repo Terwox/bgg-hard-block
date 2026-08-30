@@ -29,8 +29,8 @@ assert.deepEqual(
 
 assert.deepEqual(
   manifest.permissions,
-  ["scripting", "storage"],
-  "SPA recovery may use scripting but must not request tabs or webNavigation history access"
+  ["scripting", "storage", "webRequest"],
+  "BGG-only credential capture may observe requests but must not request tabs or navigation history"
 );
 
 assert.equal(

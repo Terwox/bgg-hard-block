@@ -59,7 +59,7 @@ where each is answered:
 | Question | Where |
 | --- | --- |
 | Does it phone home? | [`src/background.js`](src/background.js), `fetchApi` and `assertAllowedApiRequest` — the worker constructs and validates every request |
-| What happens to my auth header? | [`src/page-bridge.js`](src/page-bridge.js), `captureAuthorization`, and [`src/background.js`](src/background.js), `runBridgeSession` — private, ephemeral, and never stored or sent to content |
+| What happens to my auth header? | [`src/background.js`](src/background.js), `observedAuthorization` and `runBridgeSession`, plus the document-bound fallback in [`src/page-bridge.js`](src/page-bridge.js) — private, ephemeral, and never stored or sent to content |
 | What is stored? | [PRIVACY.md](PRIVACY.md) has the complete map; writes are in `src/onboarding.js`, `src/options.js`, and [`src/background.js`](src/background.js). `src/content.js` can report only bounded page counters to the worker. |
 | Can it act before I consent? | [`src/content.js`](src/content.js) consent gate and [`src/background.js`](src/background.js), `initializeBridge` |
 | Where can it run at all? | [`manifest.json`](manifest.json) `content_scripts[].matches`, and `isDiscussionUrl` in [`src/background.js`](src/background.js) |
@@ -84,7 +84,7 @@ version.
 
 | Data | Where it lives | Leaves your machine? |
 | --- | --- | --- |
-| `GeekAuth` authorization header | ephemeral MAIN-world and background-worker memory | only back to `api.geekdo.com`, where BGG already sends it |
+| `GeekAuth` authorization header | ephemeral Chrome request-event, MAIN-world fallback, and background-worker memory | only back to `api.geekdo.com`, where BGG already sends it |
 | Consent record and subscription-linking option | `chrome.storage.local` | no |
 | Blocked usernames, result status, and counts | `chrome.storage.local` | no |
 | Profile ID→username cache | `chrome.storage.local`; entries older than 30 days are never reused and the next successful sync prunes stale/non-current IDs | no |
@@ -112,8 +112,9 @@ Chrome represents host permissions at the origin level and ignores their path
 component. The extension therefore declares the canonical BoardGameGeek origin
 for path-limited discussion integration and the canonical Geekdo API origin for
 background synchronization. It uses `scripting` for document-bound attachment
-and does **not** request `tabs` or `webNavigation`, which would expose broad
-browsing-history access.
+and `webRequest` only to observe the existing authorization header on Geekdo API
+requests initiated by an active BGG discussion document. It does **not** request
+`tabs`, `webNavigation`, or `history` access.
 
 ## Subscription linking
 
@@ -130,12 +131,15 @@ available and untouched:
 
 ## How it works
 
-BGG's frontend requests `https://api.geekdo.com/api/userblock`. A short MAIN-world
-bridge observes the `GeekAuth` request header that BGG itself adds and returns
-that value only through Chrome's private `executeScript` result. It never enters
-the DOM, extension storage, logs, or the isolated content script. Header
-inspection becomes inert immediately after that one result; the remaining
-native-mutation wrappers retain no authorization binding.
+BGG's frontend requests `https://api.geekdo.com/api/userblock`. After consent,
+the background worker observes the `GeekAuth` header that BGG itself adds through
+Chrome's read-only request event. The listener is limited to `api.geekdo.com/api/*`,
+requires BGG as the initiator, validates the active tab is on a supported
+discussion URL, verifies stored consent for each observed request, and binds each
+value to the exact tab and document. A short
+MAIN-world bridge remains as a document-bound fallback. The value never enters
+the DOM, extension storage, logs, or the isolated content script, and an unused
+observation expires after five seconds.
 
 The background worker validates the exact sending document and current consent,
 receives the privately captured authorization value, then rechecks consent and
@@ -241,6 +245,21 @@ fallback verifies extension behavior, not current live-site compatibility.
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
+
+## v0.4.2
+
+- Fixed a cold-worker race in v0.4.1 that could discard BGG's authorization
+  header before stored consent finished loading.
+- Added coverage for authorization arriving before the content bridge starts
+  and for refusing the same event without current consent.
+
+## v0.4.1
+
+- Fixed filtering after upgrade when BGG cached its network transport before the
+  0.4.0 MAIN-world bridge could attach.
+- Added consent-gated, exact-document authorization observation for only BGG's
+  Geekdo API requests, while retaining the existing private fallback.
+- Added a regression fixture for BGG's split display-name/`@handle` quote markup.
 
 ## v0.4.0
 

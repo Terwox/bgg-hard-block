@@ -45,10 +45,11 @@ Privacy by design:
 - data goes only to BGG/Geekdo endpoints needed for the disclosed features
 - no ads, analytics, telemetry, remote code, developer server, or third-party sharing
 
-Version 0.4.0 validates the exact requesting BGG discussion document, captures
-authentication privately, and performs authenticated API requests in the
-extension background worker so page code cannot forge response data. Consent and
-the subscription-linking option are checked before capture, before network work,
+Version 0.4.2 validates the exact requesting BGG discussion document, observes
+authentication privately on only BGG-initiated Geekdo API requests, and performs
+authenticated API requests in the extension background worker so page code
+cannot forge response data. Consent and the subscription-linking option are
+checked before credential use, before network work,
 before each subscription addition, and before any result is saved or returned.
 This security boundary requires direct host access to `api.geekdo.com`; Chrome
 may ask existing users to approve that new, narrowly scoped site access before
@@ -84,6 +85,15 @@ entries older than 30 days are never reused and whose next successful sync
 prunes stale/non-current IDs; and subscription-linking status. No draft text or
 authentication value is stored. No data is synced to the developer or any
 destination other than the required BGG/Geekdo endpoints.
+
+### `webRequest`
+
+Observes, without modifying or blocking, the existing `GeekAuth` header on
+`https://api.geekdo.com/api/*` requests initiated by BoardGameGeek. Capture is
+enabled only after current consent, validated against an active supported
+discussion tab, bound to the exact tab/document, held only in memory, and expires
+after five seconds if unused. No other request destination or initiator is
+accepted.
 
 ### BoardGameGeek and Geekdo host access
 
@@ -123,6 +133,21 @@ linking when BGG's native Hidden Users changes. Linking retries on the next
 supported discussion-page load. Geekdo provides no conditional revision token,
 so the final Hidden Users `GET` and subscription-block `PUT` are separate rather
 than atomic.
+
+## Version 0.4.2 update
+
+- Fixed the v0.4.1 cold-start race that could discard BGG authorization before
+  the extension finished loading stored consent.
+- Authorization candidates now verify stored consent for the request itself,
+  including when the page request arrives before its content bridge.
+
+## Version 0.4.1 update
+
+- Fixed missing post and quote filtering when BGG initialized its network
+  transport before the document-bound fallback could attach.
+- Added a consent-gated, read-only request observer restricted to BGG-initiated
+  Geekdo API calls and the exact active discussion document.
+- Added current split display-name/`@handle` quote markup to regression coverage.
 
 ## Version 0.4.0 update
 

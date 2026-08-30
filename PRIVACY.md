@@ -71,21 +71,24 @@ discussion pages. The canonical `api.geekdo.com` origin is used only for the
 enumerated Hidden Users, public-profile, and optional subscription-block API
 requests described below.
 
-The extension does not store the BGG `GeekAuth` authorization value. A
-document-bound MAIN-world capture returns it privately to the background worker,
-which uses it only during the current synchronization and then clears its
-reference. It is never exposed to the DOM or isolated content script. The worker
+The extension does not store the BGG `GeekAuth` authorization value. After
+current consent is verified, the background worker can observe it on an existing
+BGG-initiated request to `https://api.geekdo.com/api/*` through Chrome's read-only
+request event. The worker validates the active tab is a supported discussion and
+rechecks stored consent for that event before reading the header, then binds the
+value to its exact document; an unused observation expires after five seconds.
+A document-bound MAIN-world capture remains as a private fallback. The
+value is never exposed to the DOM or isolated content script. The worker
 constructs only enumerated exact `https://api.geekdo.com` requests, refuses
 redirects, and does not accept API response data or request parameters from page
 code.
 
-There is no declarative MAIN-world or settings bridge. The isolated content
-script asks the background worker to inject credential-capture code into its
-exact sending document. The worker checks current consent and the subscription
-option before capture, before network work, before each subscription addition,
-and before it saves or returns the public result. Usernames and status return
-only through Chrome extension messaging; there is no page-DOM data bridge. The
-only cross-world DOM event is a data-free, random-nonce-bound revocation signal
+There is no declarative MAIN-world or settings bridge. The worker checks current
+consent and the subscription option before credential use, before network work,
+before each subscription addition, and before it saves or returns the public
+result. Usernames and status return only through Chrome extension messaging;
+there is no page-DOM data bridge. The only cross-world DOM event is a data-free,
+random-nonce-bound revocation signal
 when the page wrapper observes a native Hidden Users mutation. Its isolated
 relay can only ask the worker to pause optional subscription linking for that
 active document; it carries no user data, credential, identifier, destination,

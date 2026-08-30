@@ -75,9 +75,9 @@ Inside is one directory per installed version. Diff its `src/` against this
 repository at the matching tag:
 
 ```bash
-git checkout v0.4.0
-diff -ru src "<extensions-path>/0.4.0_0/src"
-diff -u manifest.json "<extensions-path>/0.4.0_0/manifest.json"
+git checkout v0.4.2
+diff -ru src "<extensions-path>/0.4.2_0/src"
+diff -u manifest.json "<extensions-path>/0.4.2_0/manifest.json"
 ```
 
 Expected differences, all added by Chrome rather than by the author:
@@ -99,19 +99,21 @@ claims become checkable by reading, and the places worth reading are short:
 | Question | Where to look |
 | --- | --- |
 | Does it phone home? | `src/background.js`, `fetchApi` and `assertAllowedApiRequest` — the worker constructs and validates every request |
-| What happens to my auth header? | `src/page-bridge.js`, `captureAuthorization`, and `src/background.js`, `runBridgeSession` — private, ephemeral, and never stored or sent to content |
+| What happens to my auth header? | `src/background.js`, `observedAuthorization` and `runBridgeSession`, with `src/page-bridge.js` as a private fallback — ephemeral and never stored or sent to content |
 | What gets stored? | `PRIVACY.md` has the complete map; writes are in `src/onboarding.js`, `src/options.js`, and `src/background.js`; `src/content.js` can report only bounded page counters to the worker |
 | Does it act before I consent? | `src/content.js` consent gate and `src/background.js`, `runBridgeSession` |
 | Where can it run at all? | `manifest.json`, `content_scripts[].matches`, and `isDiscussionUrl` in `src/background.js` |
 
-Version 0.4.0 has no declarative MAIN-world or settings bridge. The manifest
-declares only the isolated content filter. That script requests a
-document-bound MAIN-world injection from `background.js`; the background worker
-validates the active sender and checks current consent and options before and
-after the injection. `src/page-bridge.js` returns only the captured authorization
-value through `chrome.scripting.executeScript`; `src/background.js` performs all
-authenticated API work and returns only validated public usernames/status to the
-isolated script. No page-writable data bridge participates in persistence.
+Version 0.4.2 has no declarative MAIN-world or settings bridge. The manifest
+declares only the isolated content filter. After current consent is verified,
+`background.js` observes the existing Geekdo authorization header through a
+read-only Chrome request event restricted to BGG-initiated API requests and an
+active, supported tab/document. Consent is read for each candidate event so a
+cold worker cannot miss the page's startup request burst. The document-bound
+`src/page-bridge.js` capture
+remains as a private fallback. `src/background.js` performs all authenticated API
+work and returns only validated public usernames/status to the isolated script.
+No page-writable data bridge participates in persistence.
 
 ## Releasing (maintainer)
 
