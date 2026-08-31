@@ -175,3 +175,142 @@ Step 1 needs a headed run against the profile Alice is signed into; the
 
 Manifest was **not** bumped to 0.4.3. There is no verified fix to ship, and the
 gate demonstrably works headless, so a version bump would claim something untrue.
+
+---
+
+## 2026-08-31, third session — reproduced on live BGG; two real defects, one fixed
+
+Run inside the authorized 04:00–08:00 headed window, against `boardgamegeek.com`
+signed in as `Terwox`.
+
+### Alice's profile: the predicted storage check came back positive
+
+`chrome.storage.local` for the extension in Alice's real Chrome profile
+(`.../Google/Chrome/User Data/Default/Local Extension Settings/hkbnpeoh…`,
+read straight off disk) holds **exactly two keys**:
+
+```
+bggHardBlockerConsent  {"disclosureVersion":"2026-08-15","granted":true,"grantedAt":"2026-08-30T21:28:47.153Z"}
+bggHardBlockerOptions  {"linkSubscriptionBlocks":true}
+```
+
+`bggHardBlockerProfileCache`, `bggHardBlockerSubscriptionState` and
+`bggHardBlockerState` are **absent**, and the LevelDB was created at 21:28:45Z —
+two seconds before consent. So the sync has **never once succeeded** on that
+profile. This is the check the previous session specified, and it confirms the
+defect is downstream of the consent gate.
+
+### Also found: the extension is currently disabled in both profiles
+
+`disable_reasons: [1]` (`DISABLE_USER_ACTION`) in both Alice's default Chrome
+profile and the `rabbit` CDP profile; `chrome.developerPrivate.getExtensionInfo`
+reports `state: "DISABLED"` with no policy, corruption, or permission reason.
+Navigating to any of its own pages returns `ERR_BLOCKED_BY_CLIENT`. This is
+*not* the cause of the reported symptom — a disabled extension injects nothing,
+and Alice observed the content script running — but it does mean the extension
+is doing nothing at all right now. It was enabled in the `rabbit` profile for
+this investigation and restored to disabled afterwards.
+
+### The 4s/5s capture windows are not the problem
+
+Measured on a live thread with CDP network tracing: BGG issues **20**
+`api.geekdo.com` requests during load, **7** of them carrying
+`Authorization: GeekAuth …`, and the first authorized one lands at **+0.36s** —
+comfortably inside `AUTHORIZATION_WAIT_MS` (4s) and `MAIN_CAPTURE_DEADLINE_MS`
+(5s). All are `xmlhttprequest` from the main frame with
+`initiator: https://boardgamegeek.com`, so they satisfy every filter in
+`observedAuthorization`. Timing and realm are **ruled out**.
+
+### Reproduced Alice's exact symptom, and named the failure
+
+Live thread, extension enabled, consent granted, instrumented service worker:
+
+```
+DOM:      running:true  ready:true  redacted:0
+bridge:   {status:"error", reason:"sync-failed"}
+storage:  ["bggHardBlockerConsent","bggHardBlockerOptions"]
+```
+
+That is Alice's report exactly, including the "both attributes, nothing
+redacted, nothing written" signature.
+
+### Defect 1 — a duplicate MAIN-world entry cancels the capture. **Fixed.**
+
+`chrome.scripting.executeScript` runs `installBggBlockListBridge` **twice in the
+same document** for a single call. Captured by defining an accessor over
+`__bggHardBlockerPageBridgeInstalled` and `__bggHardBlockerStop`:
+
+```
++181.6ms INSTALLATION_KEY=true    at installBggBlockListBridge (:283)
++182.1ms STOP CALLED              at installBggBlockListBridge (:58)   <- second entry stops the first
++182.2ms INSTALLATION_KEY=false   at stopBggHardBlockerBridge
++182.2ms INSTALLATION_KEY=true    at installBggBlockListBridge (:283)
+```
+
+The losing entry resolves `{status:"error", reason:"cancelled"}` ~41ms after
+injection. In `runBridgeSession` that result **wins the capture race**, so the
+session gives up at ~+230ms and injects `stopPageBridge`, which then also kills
+the replacement entry that was still waiting. The real `GeekAuth` header does
+not arrive until **+809ms** — the session had already reported `sync-failed`
+~580ms earlier.
+
+Note `tests/page-bridge-security.html::runDuplicateInstallScenario` already
+covered this page-level scenario and asserts the *replacement wins* contract
+deliberately. That contract is fine; the bug is that `background.js` treats the
+displaced entry's `cancelled` as a terminal session failure.
+
+**Fix:** in `runBridgeSession`, a MAIN entry that resolves with
+`reason === "cancelled"` no longer ends the capture race — the session keeps
+waiting for the observed-header fallback or the 5s deadline. Every other bridge
+failure stays terminal. Regression test:
+`background.test.js::"keeps the capture open when a duplicate MAIN entry reports
+cancelled"`, which fails on the unfixed `background.js` with `'error' !== 'ready'`.
+
+### Defect 2 — a spurious `status:"loading"` invalidates a live document. **Open.**
+
+Loading the same live thread with the *fixed* build (unpacked, real BGG, signed
+in) does **not** sync either. The MAIN capture now succeeds:
+
+```
++182ms  exec:start  installBggBlockListBridge MAIN
++804ms  exec:end    {"status":"ready","authorization":"GeekAuth …"}
++804ms  performSync:start
++858ms  performSync:err  AbortError: signal is aborted without reason
++858ms  bridge:end  {"status":"error","reason":"sync-cancelled"}
+```
+
+The abort comes from `background.js:1114` — the `chrome.tabs.onUpdated`
+listener. BGG fires a **second** `status:"loading"` around +949ms **with no URL
+change** on a document that never went away:
+
+```
++163ms  onUpdated {"status":"loading","url":"https://boardgamegeek.com/thread/3760807/…"}  <- the real navigation
++949ms  onUpdated {"status":"loading"}   keys:["status"]   tabUrl unchanged               <- spurious
++949ms  abortTabSyncs -> background.js:1114
++949ms  bridge:end {"status":"error","reason":"stale-document"}
++1133ms deliverAuth x8                                                                    <- fallback arrives too late
+```
+
+The handler treats any `status:"loading"` as a new navigation: it bumps
+`tabRouteRevisions`, calls `abortTabSyncs`, and runs `clearTabDocumentSessions`,
+which also discards the observed-authorization waiters. So both capture paths
+are destroyed for a document that is still current.
+
+This explains why the internal reason varies run to run — `sync-failed`,
+`sync-cancelled`, `stale-document` — while the user-visible symptom is always
+identical: `running` + `ready`, zero redacted, nothing written.
+
+Fixing this needs judgment and was deliberately **not** attempted at 05:40:
+`status:"loading"` without `changeInfo.url` is also what a genuine reload looks
+like, and that invalidation is the trust boundary that stops an authorization
+being reused across navigations. Loosening it blind is the wrong move. The
+promising direction is to leave invalidation alone and let the content script
+**retry** the bridge handshake when it receives `stale-document` while its own
+document is still current, rather than calling `acceptBridgeError()` once and
+giving up.
+
+### Not done
+
+Manifest was **not** bumped to 0.4.3. Defect 2 still blocks any sync on the live
+site, so the gate does not demonstrably work end to end and a version bump would
+claim something untrue.

@@ -925,6 +925,19 @@ async function runBridgeSession(message, sender, generation, reservation) {
             target: { tabId, documentIds: [documentId] }, func: installBggBlockListBridge,
             args: [{ channelNonce: message.channelNonce }], world: "MAIN", injectImmediately: true
           });
+          // Chrome can run the injected function twice in one document for a
+          // single executeScript call. The duplicate entry replaces the first,
+          // which then resolves as "cancelled" — measured 41ms after injection
+          // on a live BGG thread, while BGG's first authenticated
+          // api.geekdo.com request is ~600ms away. Ending the capture race on
+          // that result discarded both the replacement entry still waiting in
+          // the page and this session's observed-header fallback, and reported
+          // "sync-failed" before any authorization could exist. Only a
+          // cancelled entry is treated this way; every other bridge failure is
+          // still terminal.
+          if (injectionResults?.[0]?.result?.reason === "cancelled") {
+            return await new Promise(() => {});
+          }
           return { source: "page", injectionResults };
         })(),
         observedCapture.promise.then((observed) => ({ source: "network", observed })),

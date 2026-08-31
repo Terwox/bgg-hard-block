@@ -278,6 +278,39 @@ test("uses an exact-document BGG API header when late MAIN-world capture misses"
   assert.ok(calls.fetches.every((call) => call.headers.Authorization === TOKEN));
 });
 
+test("keeps the capture open when a duplicate MAIN entry reports cancelled", async () => {
+  // Chrome runs the injected bridge twice in one document for a single
+  // executeScript call. The entry that loses the duplicate resolves as
+  // "cancelled" almost immediately, while BGG's first authenticated
+  // api.geekdo.com request is several hundred milliseconds later. Measured on
+  // boardgamegeek.com/thread/... on 2026-08-31: cancelled at +219ms, first
+  // observed GeekAuth header at +809ms. 0.4.2 ended the session on the
+  // cancelled result and answered "sync-failed", so nothing was ever synced.
+  const sender = validSender({ tab: { id: 46 }, documentId: "duplicate-entry-document" });
+  injectionResult = (options) => [{ frameId: 0, documentId: options.target.documentIds[0],
+    result: { status: "error", reason: "cancelled" } }];
+  const pending = sendBridge(validMessage(), sender);
+  await settle();
+
+  listeners.beforeSendHeaders({
+    url: "https://api.geekdo.com/api/userblock",
+    initiator: "https://boardgamegeek.com",
+    tabId: sender.tab.id,
+    frameId: 0,
+    documentId: sender.documentId,
+    type: "xmlhttprequest",
+    requestHeaders: [{ name: "Authorization", value: TOKEN }]
+  });
+  await settle();
+
+  const outcome = await pending;
+  assert.equal(outcome.response.status, "ready");
+  assert.ok(calls.fetches.every((call) => call.headers.Authorization === TOKEN));
+  // Tearing the page bridge down here is what killed the replacement entry.
+  assert.deepEqual(stopExecutions(), []);
+  assert.equal(persisted().length, 1);
+});
+
 test("retains a consent-authorized header observed before the bridge session starts", async () => {
   const sender = validSender({ tab: { id: 44 }, documentId: "cold-worker-document" });
   listeners.beforeSendHeaders({
