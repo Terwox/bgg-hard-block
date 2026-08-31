@@ -48,4 +48,11 @@ for fixture in dom-filter consent-gate onboarding page-bridge page-bridge-securi
     "$repo_dir/tests/$fixture.html"
 done
 
+# End-to-end consent-gate regression. Unlike the fixtures above, this loads the
+# real unpacked extension and drives the genuine onboarding button, so it is the
+# only check that can catch a consent path that is broken as a whole.
+for mode in "" "--tab-first"; do
+  python3 "$repo_dir/tests/consent_gate_e2e.py" --chrome "$chrome_bin" $mode
+done
+
 echo "All extension checks passed."
