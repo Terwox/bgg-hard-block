@@ -246,6 +246,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
 
+## v0.4.3
+
+- Fixed live filtering never syncing at all: BGG fires a second navigation-like
+  `loading` event on a document that never went away, and the extension was
+  invalidating that still-current document's sync. The content script now
+  re-asks for a sync twice when its session is invalidated, instead of accepting
+  the first refusal.
+- Fixed a duplicate MAIN-world bridge entry ending the authorization capture
+  before BGG's first authenticated request could arrive.
+- Added regression coverage that drives the real consent and bridge paths end to
+  end, rather than calling the DOM filter directly.
+
 ## v0.4.2
 
 - Fixed a cold-worker race in v0.4.1 that could discard BGG's authorization
