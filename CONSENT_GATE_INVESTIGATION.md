@@ -266,7 +266,7 @@ failure stays terminal. Regression test:
 `background.test.js::"keeps the capture open when a duplicate MAIN entry reports
 cancelled"`, which fails on the unfixed `background.js` with `'error' !== 'ready'`.
 
-### Defect 2 — a spurious `status:"loading"` invalidates a live document. **Open.**
+### Defect 2 — a spurious `status:"loading"` invalidates a live document. **Fixed headless 2026-09-01; see the fourth session below.**
 
 Loading the same live thread with the *fixed* build (unpacked, real BGG, signed
 in) does **not** sync either. The MAIN capture now succeeds:
@@ -314,3 +314,69 @@ giving up.
 Manifest was **not** bumped to 0.4.3. Defect 2 still blocks any sync on the live
 site, so the gate does not demonstrably work end to end and a version bump would
 claim something untrue.
+
+## 2026-09-01, fourth session — Defect 2 fixed headless; live verification still owed
+
+### Defect 2 — **fixed in the content script, not in the invalidation.**
+
+The service worker's `chrome.tabs.onUpdated` handler is unchanged. Any
+`status:"loading"` still bumps `tabRouteRevisions`, aborts the tab's syncs and
+clears its document sessions, because that is the boundary that stops an
+authorization captured for one document being reused by another, and
+`status:"loading"` without `changeInfo.url` is also exactly what a genuine
+reload looks like. There is no way to tell BGG's spurious event from a real one
+at that layer, so nothing there was loosened.
+
+Instead the document that lost the race asks again. `src/content.js` now
+retries `initialize-bridge` when the answer is `stale-document` or
+`sync-cancelled` — the two reasons that mean "your session was invalidated",
+not "your request was refused" — at +300ms and +900ms, then accepts the error.
+
+Why this is safe:
+
+- A document that genuinely navigated away has no content script left to retry.
+- An SPA route change runs `teardownDiscussionScripts` -> `stopContentScript`,
+  which sets `active = false` and now also clears the pending retry timer, so a
+  scheduled retry cannot fire into a scope that was torn down.
+- Every attempt is a whole new `runBridgeSession`: tab URL, `pendingUrl`,
+  `isDiscussionUrl`, consent, `documentId` and both revision counters are
+  revalidated from scratch. A retry cannot smuggle a stale authorization past a
+  check the first attempt would have failed.
+- The retry is bounded at two, and `POST_LOAD_MAX_HOLD_MS` (500ms) still
+  releases the page long before the retries finish, so a tab that keeps
+  invalidating fails open and readable rather than blank.
+
+Timing is deliberate. The live trace has the spurious invalidation at ~+949ms
+and BGG's own `deliverAuth` burst at ~+1133ms, i.e. *after* the invalidation.
+`clearObservedAuthorizations` has already run by then, so those headers land in
+`recentAuthorizations`, which the service worker holds for
+`RECENT_AUTHORIZATION_MAX_AGE_MS` = 5000ms. A retry at ~+1250ms therefore has a
+warm observed header waiting for it and does not depend on BGG issuing another
+authenticated request inside the MAIN bridge's 4s window.
+
+### New coverage: three content-runtime fixtures
+
+`filterDom`-style fixtures could not have caught this; the gap was in what the
+content script does with a *rejected* bridge answer. All three drive the real
+`src/content.js` bridge path:
+
+| fixture | asserts | against `main` |
+| --- | --- | --- |
+| `tests/bridge-retry-runtime.html` | `stale-document`, then `sync-cancelled`, then ready — 3 attempts, one shared nonce, first retry waits >=250ms, post filtered, status written | **FAIL** — `1 bridge attempts, expected 3`; `the retried sync did not filter`; `did not report content status` |
+| `tests/bridge-retry-exhausted.html` | always `stale-document` — exactly 3 attempts and no fourth, page still revealed, nothing filtered | **FAIL** — `1 bridge attempts, expected exactly 3` |
+| `tests/bridge-retry-terminal.html` | `sync-failed` — exactly 1 attempt | PASS (guard, not a regression) |
+
+Red confirmed by restoring `main`'s `src/content.js` and running the three
+fixtures before applying the fix; green after. Full suite with the fix: 111
+Node unit tests, 12 release-tooling tests, 21 browser fixtures, both
+`consent_gate_e2e` modes — all pass.
+
+### Not done — and why the manifest is still 0.4.2
+
+**The fix has not been observed working on live boardgamegeek.com.** Everything
+above is headless-fixture evidence that the content script now re-asks and that
+a re-ask can succeed; it is not evidence that a real thread on Alice's profile
+syncs. The bar set for the version bump was "the gate demonstrably works", and a
+green fixture is not that. Bumping to 0.4.3 now would claim a live fix nobody
+has seen, which is exactly the mistake 0.4.2 made. Manifest stays at 0.4.2 until
+a live headed run shows a thread syncing end to end.
