@@ -371,12 +371,38 @@ fixtures before applying the fix; green after. Full suite with the fix: 111
 Node unit tests, 12 release-tooling tests, 21 browser fixtures, both
 `consent_gate_e2e` modes — all pass.
 
-### Not done — and why the manifest is still 0.4.2
+### Live verification on boardgamegeek.com — it syncs. A/B, same session.
 
-**The fix has not been observed working on live boardgamegeek.com.** Everything
-above is headless-fixture evidence that the content script now re-asks and that
-a re-ask can succeed; it is not evidence that a real thread on Alice's profile
-syncs. The bar set for the version bump was "the gate demonstrably works", and a
-green fixture is not that. Bumping to 0.4.3 now would claim a live fix nobody
-has seen, which is exactly the mistake 0.4.2 made. Manifest stays at 0.4.2 until
-a live headed run shows a thread syncing end to end.
+Headed WSLg run (`DISPLAY=:0`), Playwright Chromium 145.0.7632.6 with the repo
+loaded unpacked, a throwaway profile, and the rabbit profile's BGG cookies
+transplanted over CDP `Storage.getCookies` -> `Storage.setCookies`. Thread:
+`/thread/3746507/someone-who-refuses-to-learn-or-teach-their-own-ga`, signed in
+as Terwox. Consent granted by writing `bggHardBlockerConsent` in the extension's
+own storage from the service-worker context, then the thread opened cold and
+sampled every 2s for 24s.
+
+Both builds were run minutes apart in the same window, against the same thread,
+with the same cookies and the same profile recipe. The only difference was
+`src/content.js`.
+
+| | pre-fix (`05b6584`) | fixed |
+| --- | --- | --- |
+| `chrome.storage.local` after load | `bggHardBlockerConsent` only | + `ProfileCache`, `SubscriptionState`, `State` |
+| profile cache entries | 0 | 18 |
+| subscription state | absent | `state: "synced"`, 18 subscription-blocked |
+| content state | absent | 18 usernames, `source: "live"`, 1 hidden post, 2 hidden quotes |
+| `data-bgg-hard-blocker-quarantine` | never set | set |
+| elements author-checked | 0 | 58 |
+
+The pre-fix column is Alice's report, reproduced exactly one more time:
+`running` and `ready` both set, nothing checked, nothing written. The fixed
+column is the extension doing its job on the live site for the first time since
+0.4.0.
+
+### Manifest bumped to 0.4.3
+
+The bar was "the gate demonstrably works". It works headless — 111 Node unit
+tests, 12 release-tooling tests, 21 browser fixtures, both `consent_gate_e2e`
+modes — and it works on the live site with a same-session control run showing
+the unfixed build failing beside it. Not published to the Chrome Web Store; that
+is Alice's call.
