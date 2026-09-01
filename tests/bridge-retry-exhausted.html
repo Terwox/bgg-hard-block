@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Content runtime bridge retry bound test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      // A tab that keeps invalidating must not turn the retry into a loop, and
+      // exhausting the retries must still release the page. Failing closed here
+      // would leave BGG blank for the user.
+      const bridgeRequests = [];
+      const writes = [];
+      const runtimeErrors = [];
+      addEventListener("error", (event) => runtimeErrors.push(event.message));
+      addEventListener("unhandledrejection", (event) => runtimeErrors.push(String(event.reason)));
+
+      globalThis.chrome = {
+        runtime: {
+          getManifest() {
+            return { version: "0.4.0" };
+          },
+          sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              writes.push(message);
+              return Promise.resolve({ status: "ok" });
+            }
+            bridgeRequests.push({ message, at: performance.now() });
+            return Promise.resolve({ status: "error", reason: "stale-document" });
+          }
+        },
+        storage: {
+          local: {
+            async get(key) {
+              if (key === "bggHardBlockerConsent") {
+                return {
+                  bggHardBlockerConsent: {
+                    granted: true,
+                    disclosureVersion: "2026-08-15"
+                  }
+                };
+              }
+              return {};
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <main>
+      <gg-post id="unfiltered-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Some%20User">Some User</a></header>
+          <div class="post-body">A failed sync must leave the page readable.</div>
+        </article>
+      </gg-post>
+    </main>
+    <script>
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+      (async () => {
+        // Both retry delays plus generous slack, then long enough again that a
+        // fourth attempt would have been made.
+        await wait(2500);
+
+        check(
+          bridgeRequests.length === 3,
+          `content runtime made ${bridgeRequests.length} bridge attempts, expected exactly 3`
+        );
+        check(
+          document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "exhausted retries left the page hidden"
+        );
+        check(
+          Boolean(document.getElementById("unfiltered-post")),
+          "a failed sync filtered content anyway"
+        );
+        check(runtimeErrors.length === 0, `content runtime raised errors: ${runtimeErrors.join("; ")}`);
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          attempts: bridgeRequests.length,
+          writeCount: writes.length,
+          runtimeErrors
+        });
+      })().catch((error) => {
+        document.body.dataset.status = "fail";
+        document.body.dataset.report = JSON.stringify({
+          failures: [...failures, error?.stack || String(error)],
+          attempts: bridgeRequests.length,
+          runtimeErrors
+        });
+      });
+    </script>
+  </body>
+</html>

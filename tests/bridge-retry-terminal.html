@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Content runtime terminal bridge failure test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      // Only the document-invalidation races are worth re-asking about. A
+      // refused or genuinely failed sync must be accepted on the first answer,
+      // so a declined consent or a dead bridge cannot triple the request load.
+      const bridgeRequests = [];
+      const writes = [];
+      const runtimeErrors = [];
+      addEventListener("error", (event) => runtimeErrors.push(event.message));
+      addEventListener("unhandledrejection", (event) => runtimeErrors.push(String(event.reason)));
+
+      globalThis.chrome = {
+        runtime: {
+          getManifest() {
+            return { version: "0.4.0" };
+          },
+          sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              writes.push(message);
+              return Promise.resolve({ status: "ok" });
+            }
+            bridgeRequests.push({ message, at: performance.now() });
+            return Promise.resolve({ status: "error", reason: "sync-failed" });
+          }
+        },
+        storage: {
+          local: {
+            async get(key) {
+              if (key === "bggHardBlockerConsent") {
+                return {
+                  bggHardBlockerConsent: {
+                    granted: true,
+                    disclosureVersion: "2026-08-15"
+                  }
+                };
+              }
+              return {};
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <main>
+      <gg-post id="unfiltered-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Some%20User">Some User</a></header>
+          <div class="post-body">A terminal failure must leave the page readable.</div>
+        </article>
+      </gg-post>
+    </main>
+    <script>
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+      (async () => {
+        await wait(2500);
+
+        check(
+          bridgeRequests.length === 1,
+          `a terminal failure produced ${bridgeRequests.length} bridge attempts, expected 1`
+        );
+        check(
+          document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "a terminal failure left the page hidden"
+        );
+        check(
+          Boolean(document.getElementById("unfiltered-post")),
+          "a terminal failure filtered content anyway"
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          attempts: bridgeRequests.length,
+          writeCount: writes.length,
+          runtimeErrors
+        });
+      })().catch((error) => {
+        document.body.dataset.status = "fail";
+        document.body.dataset.report = JSON.stringify({
+          failures: [...failures, error?.stack || String(error)],
+          attempts: bridgeRequests.length,
+          runtimeErrors
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -134,6 +134,26 @@
   // one whole-document verification pass.
   const FULL_SWEEP_DEBOUNCE_MS = 75;
 
+  // The service worker invalidates a tab's capture state on every
+  // `chrome.tabs.onUpdated` `status: "loading"`, because that is what a real
+  // navigation looks like and an authorization must never be reused across
+  // documents. BGG also fires a second `status: "loading"` with no URL change
+  // roughly a second into a thread load, on a document that never went away —
+  // measured at +949ms on boardgamegeek.com/thread/3760807 on 2026-08-31 —
+  // which killed the in-flight session for a perfectly live document and
+  // reported `stale-document` or `sync-cancelled`.
+  //
+  // Loosening the invalidation would weaken the boundary it exists to hold, so
+  // this document simply asks again. A document that genuinely navigated away
+  // has no content script left to retry, an SPA route change tears this scope
+  // down before any retry can fire, and the service worker revalidates the tab
+  // URL, the document, and consent from scratch on every attempt.
+  const RETRYABLE_BRIDGE_REASONS = new Set(["stale-document", "sync-cancelled"]);
+  // Long enough for BGG's own late authenticated requests to land — the
+  // service worker holds an observed header for 5s — and bounded so an
+  // endlessly invalidating tab cannot loop.
+  const BRIDGE_RETRY_DELAYS_MS = [300, 900];
+
   if (!core || !document.documentElement) {
     return;
   }
@@ -146,6 +166,7 @@
   let revealDeadlineTimer = 0;
   let statusWriteTimer = 0;
   let fullSweepTimer = 0;
+  let bridgeRetryTimer = 0;
   const filterRemovedNodes = new WeakSet();
 
   function ensureActiveScope() {
@@ -167,6 +188,7 @@
     window.clearTimeout(revealDeadlineTimer);
     window.clearTimeout(statusWriteTimer);
     window.clearTimeout(fullSweepTimer);
+    window.clearTimeout(bridgeRetryTimer);
 
     document.querySelectorAll(`[${CHECKED_ATTRIBUTE}]`)
       .forEach((element) => element.removeAttribute(CHECKED_ATTRIBUTE));
@@ -608,6 +630,33 @@
   }
 
   /**
+   * Ask the service worker for a live sync, retrying the invalidation races
+   * that a still-current document can lose. See RETRYABLE_BRIDGE_REASONS.
+   */
+  function requestBridgeSync(attempt) {
+    chrome.runtime
+      .sendMessage({ type: BRIDGE_MESSAGE_TYPE, channelNonce })
+      .then((payload) => {
+        if (!active) return;
+        if (payload?.status === "ready") {
+          acceptPrivateBridgePayload(payload);
+          return;
+        }
+        if (attempt < BRIDGE_RETRY_DELAYS_MS.length &&
+            RETRYABLE_BRIDGE_REASONS.has(payload?.reason)) {
+          bridgeRetryTimer = window.setTimeout(() => {
+            bridgeRetryTimer = 0;
+            if (!ensureActiveScope()) return;
+            requestBridgeSync(attempt + 1);
+          }, BRIDGE_RETRY_DELAYS_MS[attempt]);
+          return;
+        }
+        acceptBridgeError();
+      })
+      .catch(acceptBridgeError);
+  }
+
+  /**
    * Reduce a mutated node to the smallest subtree worth re-filtering.
    *
    * Re-filtering the whole document on every mutation would be quadratic on a
@@ -765,17 +814,7 @@
   }
 
   if (typeof globalThis.chrome?.runtime?.sendMessage === "function") {
-    chrome.runtime
-      .sendMessage({ type: BRIDGE_MESSAGE_TYPE, channelNonce })
-      .then((payload) => {
-        if (!active) return;
-        if (payload?.status === "ready") {
-          acceptPrivateBridgePayload(payload);
-        } else {
-          acceptBridgeError();
-        }
-      })
-      .catch(acceptBridgeError);
+    requestBridgeSync(0);
   }
 
   if (!domReady) {

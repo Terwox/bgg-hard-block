@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Content runtime bridge retry test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      // BGG fires a spurious `status: "loading"` with no URL change about a
+      // second into a thread load. The service worker treats that as a
+      // navigation and invalidates the still-live document, so the first bridge
+      // session for a perfectly current page answers "stale-document" or
+      // "sync-cancelled". Before the retry existed the content script accepted
+      // that as final and nothing was ever synced on the live site.
+      const bridgeRequests = [];
+      const writes = [];
+      const runtimeErrors = [];
+      const responses = [
+        { status: "error", reason: "stale-document" },
+        { status: "error", reason: "sync-cancelled" },
+        {
+          status: "ready",
+          usernames: ["Retry User"],
+          unresolvedCount: 0,
+          syncedAt: "2026-08-15T00:00:00.000Z"
+        }
+      ];
+      addEventListener("error", (event) => runtimeErrors.push(event.message));
+      addEventListener("unhandledrejection", (event) => runtimeErrors.push(String(event.reason)));
+
+      globalThis.chrome = {
+        runtime: {
+          getManifest() {
+            return { version: "0.4.0" };
+          },
+          sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              writes.push(message);
+              return Promise.resolve({ status: "ok" });
+            }
+            bridgeRequests.push({ message, at: performance.now() });
+            return Promise.resolve(
+              responses[Math.min(bridgeRequests.length - 1, responses.length - 1)]
+            );
+          }
+        },
+        storage: {
+          local: {
+            async get(key) {
+              if (key === "bggHardBlockerConsent") {
+                return {
+                  bggHardBlockerConsent: {
+                    granted: true,
+                    disclosureVersion: "2026-08-15"
+                  }
+                };
+              }
+              return {};
+            },
+            async set(value) {
+              writes.push(value);
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <main>
+      <gg-post id="retry-user-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Retry%20User">Retry User</a></header>
+          <div class="post-body">A retried sync must still filter this post.</div>
+        </article>
+      </gg-post>
+      <gg-post id="other-user-post">
+        <article class="post">
+          <header class="post-header"><a href="/profile/Other%20User">Other User</a></header>
+          <div class="post-body">Unblocked content must survive every attempt.</div>
+        </article>
+      </gg-post>
+    </main>
+    <script>
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+      (async () => {
+        for (let attempt = 0; attempt < 400 && bridgeRequests.length < 3; attempt += 1) {
+          await wait(10);
+        }
+        await wait(150);
+
+        check(
+          bridgeRequests.length === 3,
+          `content runtime made ${bridgeRequests.length} bridge attempts, expected 3`
+        );
+        check(
+          bridgeRequests.every((request) =>
+            request.message?.type === "bgg-hard-blocker:initialize-bridge:v1"),
+          "a retry used the wrong bridge request type"
+        );
+        const nonces = new Set(bridgeRequests.map((request) => request.message?.channelNonce));
+        check(nonces.size === 1, "retries did not reuse the document's channel nonce");
+        check(
+          /^[0-9a-f]{32}$/.test(bridgeRequests[0]?.message?.channelNonce || ""),
+          "content runtime did not generate a 128-bit nonce"
+        );
+        check(
+          bridgeRequests.length < 2 || bridgeRequests[1].at - bridgeRequests[0].at >= 250,
+          "the first retry did not wait for the invalidating navigation to settle"
+        );
+
+        check(!document.getElementById("retry-user-post"), "the retried sync did not filter");
+        check(Boolean(document.getElementById("other-user-post")), "the retried sync over-filtered");
+        check(
+          document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          "the retried sync did not authorize reveal"
+        );
+        check(writes.length > 0, "the retried sync did not report content status");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({
+          failures,
+          attempts: bridgeRequests.length,
+          writeCount: writes.length,
+          runtimeErrors
+        });
+      })().catch((error) => {
+        document.body.dataset.status = "fail";
+        document.body.dataset.report = JSON.stringify({
+          failures: [...failures, error?.stack || String(error)],
+          attempts: bridgeRequests.length,
+          runtimeErrors
+        });
+      });
+    </script>
+  </body>
+</html>
