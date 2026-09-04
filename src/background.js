@@ -7,9 +7,10 @@ if (typeof importScripts === "function") importScripts("page-bridge.js");
 const CONSENT_KEY = "bggHardBlockerConsent";
 const OPTIONS_KEY = "bggHardBlockerOptions";
 const PROFILE_CACHE_KEY = "bggHardBlockerProfileCache";
+const PROFILE_CACHE_SCHEMA_VERSION = 2;
 const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
 const CONTENT_STATE_KEY = "bggHardBlockerState";
-const CONTENT_STATE_SCHEMA_VERSION = 2;
+const CONTENT_STATE_SCHEMA_VERSION = 3;
 const BRIDGE_MESSAGE_TYPE = "bgg-hard-blocker:initialize-bridge:v1";
 const STATUS_MESSAGE_TYPE = "bgg-hard-blocker:update-content-status:v1";
 const MUTATION_MESSAGE_TYPE = "bgg-hard-blocker:native-userblock-mutation:v1";
@@ -164,12 +165,25 @@ function sanitizeProfileCache(rawCache, currentIds, now = Date.now()) {
   return cache;
 }
 
+function readProfileCache(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      value.schemaVersion !== PROFILE_CACHE_SCHEMA_VERSION ||
+      !value.profiles || typeof value.profiles !== "object" || Array.isArray(value.profiles)) {
+    return {};
+  }
+  return value.profiles;
+}
+
+function writeProfileCache(profiles) {
+  return { schemaVersion: PROFILE_CACHE_SCHEMA_VERSION, profiles };
+}
+
 async function readAuthorizationSnapshot() {
   const stored = await chrome.storage.local.get([CONSENT_KEY, OPTIONS_KEY, PROFILE_CACHE_KEY]);
   return {
     consent: stored?.[CONSENT_KEY],
     linkSubscriptionBlocks: stored?.[OPTIONS_KEY]?.linkSubscriptionBlocks !== false,
-    profileCache: stored?.[PROFILE_CACHE_KEY]
+    profileCache: readProfileCache(stored?.[PROFILE_CACHE_KEY])
   };
 }
 
@@ -1034,7 +1048,7 @@ async function runBridgeSession(message, sender, generation, reservation) {
     await assertStillAuthorized(initial, controller.signal);
     if (generation === latestAuthenticatedGeneration) {
       writtenValues = {
-        [PROFILE_CACHE_KEY]: syncResult.profileCache,
+        [PROFILE_CACHE_KEY]: writeProfileCache(syncResult.profileCache),
         [SUBSCRIPTION_STATE_KEY]: { ...syncResult.subscriptionLinking, updatedAt: new Date().toISOString() }
       };
       await chrome.storage.local.set(writtenValues);
