@@ -50,7 +50,10 @@
     'gg-thread-listing a[href*="/profile/"]',
     'gg-reactions-list-popover gg-thumbs-list a[href*="/profile/"]'
   ].join(", ");
+  const SUBSCRIPTION_IMAGE_SELECTOR = "gg-notice .item-image";
   const REDACTED_PROFILE_ATTRIBUTE = "data-bgg-hard-blocker-redacted";
+  const HIDDEN_SUBSCRIPTION_AVATAR_ATTRIBUTE =
+    "data-bgg-hard-blocker-hidden-subscription-avatar";
   const BGG_ORIGIN = "https://boardgamegeek.com";
 
   // Matches one BBCode quote token: [q], [q=name], [q="name"], [q='name'], [/q].
@@ -116,6 +119,29 @@
     } catch (_error) {
       return "";
     }
+  }
+
+  /** Extract BGG's stable custom-avatar filename from a direct or nested URL. */
+  function avatarIdFromUrl(value) {
+    if (typeof value !== "string" || !value || value.length > 8192) {
+      return "";
+    }
+
+    let decoded = value;
+    for (let pass = 0; pass < 3; pass += 1) {
+      try {
+        const next = decodeURIComponent(decoded);
+        if (next === decoded) break;
+        decoded = next;
+      } catch (_error) {
+        break;
+      }
+    }
+
+    const match = decoded.match(
+      /\/avatars\/[^?#\s]*?(avatar_(?:id)?[1-9]\d{0,15}\.(?:gif|jpe?g|png|webp))(?:[?#\s]|$)/i
+    );
+    return match ? match[1].toLocaleLowerCase("en-US") : "";
   }
 
   /**
@@ -438,6 +464,67 @@
   }
 
   /**
+   * Read the custom-avatar identifier from a hydrated subscriptions image.
+   * Returns `null` while there is no usable image source, `""` for ordinary
+   * thread/GeekList artwork, and a filename for a user avatar.
+   */
+  function subscriptionAvatarId(imageRegion) {
+    if (
+      !imageRegion ||
+      imageRegion.nodeType !== 1 ||
+      !imageRegion.matches(SUBSCRIPTION_IMAGE_SELECTOR)
+    ) {
+      return null;
+    }
+
+    const image = imageRegion.querySelector("gg-image img, img");
+    if (!image) return null;
+    const sources = [
+      image.currentSrc,
+      image.getAttribute("src"),
+      image.getAttribute("srcset"),
+      image.getAttribute("content")
+    ].filter((value) => typeof value === "string" && value.trim());
+    if (!sources.length) return null;
+    for (const source of sources) {
+      const avatarId = avatarIdFromUrl(source);
+      if (avatarId) return avatarId;
+    }
+    return "";
+  }
+
+  function normalizedAvatarSet(values) {
+    return new Set(Array.from(values || []).map((value) =>
+      typeof value === "string" ? value.toLocaleLowerCase("en-US") : ""
+    ).filter((value) => /^avatar_(?:id)?[1-9]\d{0,15}\.(?:gif|jpe?g|png|webp)$/.test(value)));
+  }
+
+  /** Hide only the portrait region of a blocked user's subscriptions row. */
+  function hideBlockedSubscriptionAvatars(root, blockedAvatarIds) {
+    const blocked = normalizedAvatarSet(blockedAvatarIds);
+    let hidden = 0;
+
+    for (const imageRegion of collectElements(root, SUBSCRIPTION_IMAGE_SELECTOR)) {
+      if (
+        !imageRegion.isConnected ||
+        imageRegion.hasAttribute(HIDDEN_SUBSCRIPTION_AVATAR_ATTRIBUTE)
+      ) {
+        continue;
+      }
+
+      const avatarId = subscriptionAvatarId(imageRegion);
+      if (!avatarId || !blocked.has(avatarId)) {
+        continue;
+      }
+
+      imageRegion.setAttribute(HIDDEN_SUBSCRIPTION_AVATAR_ATTRIBUTE, "");
+      hidden += 1;
+    }
+
+    return hidden;
+  }
+
+  /**
    * Strip blocked users' quotations out of a reply draft.
    *
    * When BGG's **Quote** button is clicked, it inserts the quoted post as nested
@@ -530,12 +617,14 @@
    *
    * @param {Node} root Document or subtree to filter.
    * @param {Iterable<string>|Set<string>} blockedUsernames
-   * @returns {{posts: number, quotes: number, profileNames: number}} How many
-   *   posts/quotes were removed and retained-surface names were redacted.
+   * @param {Iterable<string>|Set<string>} blockedAvatarIds
+   * @returns {{posts: number, quotes: number, profileNames: number,
+   *   subscriptionAvatars: number}} How many posts/quotes were removed and
+   *   retained-surface names or subscription portraits were suppressed.
    */
-  function filterDom(root, blockedUsernames) {
+  function filterDom(root, blockedUsernames, blockedAvatarIds = []) {
     const blocked = normalizedBlockedSet(blockedUsernames);
-    const result = { posts: 0, quotes: 0, profileNames: 0 };
+    const result = { posts: 0, quotes: 0, profileNames: 0, subscriptionAvatars: 0 };
 
     for (const post of collectPosts(root)) {
       // A previous iteration may have removed an ancestor of this node.
@@ -566,6 +655,7 @@
     }
 
     result.profileNames = redactBlockedProfileNames(root, blocked);
+    result.subscriptionAvatars = hideBlockedSubscriptionAvatars(root, blockedAvatarIds);
 
     return result;
   }
@@ -574,6 +664,8 @@
   // that the rest of the extension trusts.
   return Object.freeze({
     filterDom,
+    avatarIdFromUrl,
+    hideBlockedSubscriptionAvatars,
     isReadyAnonymousQuote,
     isNativeBlockedPlaceholder,
     makeBlockedSet,
@@ -582,6 +674,7 @@
     quoteUsername,
     redactBlockedProfileNames,
     sanitizeBlockedQuotes,
+    subscriptionAvatarId,
     usernameFromProfileHref
   });
 });

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BGG Hard Block",
-  "version": "0.4.3",
-  "description": "Hard-removes hidden users from BGG discussions and optionally links them to subscription blocks.",
+  "version": "0.4.4",
+  "description": "Hard-removes hidden users from BGG discussions, hides their feed avatars, and optionally links subscription blocks.",
   "minimum_chrome_version": "111",
   "homepage_url": "https://github.com/terwox/bgg-hard-block",
   "permissions": [
@@ -46,7 +46,9 @@
         "https://boardgamegeek.com/image/*",
         "https://boardgamegeek.com/video/*",
         "https://boardgamegeek.com/filepage/*",
-        "https://boardgamegeek.com/blog/*/blogpost/*"
+        "https://boardgamegeek.com/blog/*/blogpost/*",
+        "https://boardgamegeek.com/subscriptions",
+        "https://boardgamegeek.com/subscriptions/"
       ],
       "css": [
         "src/content.css"

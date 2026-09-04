@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective date:** August 15, 2026
+**Effective date:** September 3, 2026
 
 **Developer:** Terwox
 
@@ -17,10 +17,13 @@ to the new version before processing BGG data again.
 
 ## Data used
 
-- BGG Hidden Users identifiers and the public BGG usernames associated with them
+- BGG Hidden Users identifiers and the public BGG usernames and custom-avatar
+  identifiers associated with them
 - discussion content and author attribution markup rendered on BGG forum indexes,
   forum threads, thumbs lists, GeekLists, images, videos, files, and individual
   blog posts
+- subscription-feed image markup, used only to recognize a blocked user's
+  custom-avatar identifier while leaving non-avatar artwork alone
 - reply-draft text BGG inserts into the editor after the user clicks Quote
 - the current BGG page address, checked only in memory to enforce the supported
   discussion-page scope and never retained
@@ -32,7 +35,9 @@ The extension uses this data only to redact blocked author names on forum
 indexes and thumbs popovers; remove blocked posts, native blocked-user
 placeholders, quotations
 attributed to blocked users, and complete blocked-user quotation subtrees from
-BGG-generated reply drafts; report local removal/redaction counts; and, if the
+BGG-generated reply drafts; hide blocked users' custom avatars from the
+subscriptions feed while retaining each feed row and ordinary artwork; report
+local removal/redaction counts; and, if the
 user leaves subscription linking enabled, add missing user-level subscription
 blocks to their BGG account. It never removes a subscription block.
 
@@ -44,8 +49,8 @@ The complete local-storage map is:
 | --- | --- |
 | `bggHardBlockerConsent` | Consent granted flag, disclosure version, and grant time |
 | `bggHardBlockerOptions` | Subscription-linking option |
-| `bggHardBlockerState` | A provenance schema marker; blocked public usernames; synchronization/result status; blocked, removed, and redacted counts; unresolved count; update times |
-| `bggHardBlockerProfileCache` | Blocked BGG profile ID→public username mappings and update times |
+| `bggHardBlockerState` | A provenance schema marker; blocked public usernames and custom-avatar identifiers; synchronization/result status; blocked, removed, and redacted counts; unresolved count; update times |
+| `bggHardBlockerProfileCache` | Blocked BGG profile ID→public username/custom-avatar mappings and update times |
 | `bggHardBlockerSubscriptionState` | Whether linking is enabled and its synchronization, added, failed, and blocked-user counts and update times |
 
 All five entries use `chrome.storage.local`. Profile-cache entries older than
@@ -60,21 +65,21 @@ does not store them in Chrome extension storage, BGG local storage, or anywhere
 else.
 
 The extension's filtering and BGG-data code is limited to canonical HTTPS URLs for those seven BGG
-discussion page families. It does not activate filtering or credential capture
+discussion page families and the subscriptions feed. It does not activate filtering or credential capture
 on BGG's home page, game pages, collection, store, account pages, or any other
 site. After a single-page route leaves a supported page, a tiny local teardown
 function may run on the destination BGG page only to remove previously installed
 behavior; it reads no page data and makes no network request. Chrome treats
 host permissions as origin-wide even when URL paths are declared. The canonical
 BoardGameGeek origin is used to identify and attach code only on supported
-discussion pages. The canonical `api.geekdo.com` origin is used only for the
+pages. The canonical `api.geekdo.com` origin is used only for the
 enumerated Hidden Users, public-profile, and optional subscription-block API
 requests described below.
 
 The extension does not store the BGG `GeekAuth` authorization value. After
 current consent is verified, the background worker can observe it on an existing
 BGG-initiated request to `https://api.geekdo.com/api/*` through Chrome's read-only
-request event. The worker validates the active tab is a supported discussion and
+request event. The worker validates the active tab is a supported page and
 rechecks stored consent for that event before reading the header, then binds the
 value to its exact document; an unused observation expires after five seconds.
 A document-bound MAIN-world capture remains as a private fallback. The
@@ -86,7 +91,7 @@ code.
 There is no declarative MAIN-world or settings bridge. The worker checks current
 consent and the subscription option before credential use, before network work,
 before each subscription addition, and before it saves or returns the public
-result. Usernames and status return only through Chrome extension messaging;
+result. Usernames, custom-avatar identifiers, and status return only through Chrome extension messaging;
 there is no page-DOM data bridge. The only cross-world DOM event is a data-free,
 random-nonce-bound revocation signal
 when the page wrapper observes a native Hidden Users mutation. Its isolated

@@ -18,7 +18,9 @@ const discussionMatches = [
   "https://boardgamegeek.com/image/*",
   "https://boardgamegeek.com/video/*",
   "https://boardgamegeek.com/filepage/*",
-  "https://boardgamegeek.com/blog/*/blogpost/*"
+  "https://boardgamegeek.com/blog/*/blogpost/*",
+  "https://boardgamegeek.com/subscriptions",
+  "https://boardgamegeek.com/subscriptions/"
 ];
 
 assert.deepEqual(
@@ -58,6 +60,7 @@ const unrelatedPages = [
   "https://boardgamegeek.com/",
   "https://boardgamegeek.com/boardgame/174430/gloomhaven",
   "https://boardgamegeek.com/collection/user/Terwox",
+  "https://boardgamegeek.com/subscriptions/blocks?feedType=user",
   "https://boardgamegeek.com/forums",
   "https://boardgamegeek.com/threads/region/1",
   "https://www.boardgamegeek.com/thread/3708408/article/48017278",
@@ -85,8 +88,10 @@ for (const url of [
   "https://boardgamegeek.com/geeklist/379404/example",
   "https://boardgamegeek.com/image/701383/example",
   "https://boardgamegeek.com/video/492443/example/example",
-  "https://boardgamegeek.com/filepage/314312/example",
-  "https://boardgamegeek.com/blog/1/blogpost/188142/example"
+    "https://boardgamegeek.com/filepage/314312/example",
+    "https://boardgamegeek.com/blog/1/blogpost/188142/example",
+    "https://boardgamegeek.com/subscriptions",
+    "https://boardgamegeek.com/subscriptions/"
 ]) {
   assert.equal(
     discussionMatches.some((pattern) => patternMatches(pattern, url)),
