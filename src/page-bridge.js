@@ -54,7 +54,8 @@ async function installBggBlockListBridge(configuration) {
           /^\/image\//,
           /^\/video\//,
           /^\/filepage\//,
-          /^\/blog\/[^/]+\/blogpost\//
+          /^\/blog\/[^/]+\/blogpost\//,
+          /^\/subscriptions\/?$/
         ].some((pattern) => pattern.test(pageUrl.pathname))
       );
     } catch (_error) {
