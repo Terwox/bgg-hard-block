@@ -121,7 +121,7 @@ No page-writable data bridge participates in persistence.
 2. Update the disclosure-version ladder in its five modules —
    `src/background.js`, `src/content.js`, `src/popup.js`, `src/options.js`, and
    `src/onboarding.js` — **only if the privacy disclosure text itself changed**.
-   The current disclosure is `2026-08-15`. Bumping it forces every existing user
+   The current disclosure is `2026-09-03`. Bumping it forces every existing user
    back through the consent screen, so don't do it for ordinary fixes.
 3. Create and activate a virtual environment, then install the hash-locked
    contributor dependency:

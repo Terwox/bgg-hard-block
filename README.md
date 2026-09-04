@@ -250,6 +250,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
 
+## v0.4.5
+
+- Fixes the subscriptions feed's private authorization bridge rejecting the
+  page before avatar mappings could synchronize.
+- Adds a regression check that keeps the bridge's exact page allowlist aligned
+  with the manifest and isolated content script.
+
 ## v0.4.4
 
 - Hides a blocked user's custom avatar from rows on BGG's subscriptions feed
