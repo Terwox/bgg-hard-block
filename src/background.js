@@ -9,7 +9,7 @@ const OPTIONS_KEY = "bggHardBlockerOptions";
 const PROFILE_CACHE_KEY = "bggHardBlockerProfileCache";
 const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
 const CONTENT_STATE_KEY = "bggHardBlockerState";
-const CONTENT_STATE_SCHEMA_VERSION = 1;
+const CONTENT_STATE_SCHEMA_VERSION = 2;
 const BRIDGE_MESSAGE_TYPE = "bgg-hard-blocker:initialize-bridge:v1";
 const STATUS_MESSAGE_TYPE = "bgg-hard-blocker:update-content-status:v1";
 const MUTATION_MESSAGE_TYPE = "bgg-hard-blocker:native-userblock-mutation:v1";
@@ -33,17 +33,20 @@ const DISCLOSURE_VERSION = /^0\.3\.[0-2]$/.test(LOADED_EXTENSION_VERSION) ? "202
   : /^0\.3\.[3-5]$/.test(LOADED_EXTENSION_VERSION) ? "2026-08-05"
     : /^0\.3\.(?:[6-9]|1[0-2])$/.test(LOADED_EXTENSION_VERSION) ? "2026-08-06"
       : /^0\.3\.1[34]$/.test(LOADED_EXTENSION_VERSION) ? "2026-08-10"
-        : /^0\.3\.15$/.test(LOADED_EXTENSION_VERSION) ? "2026-08-13" : "2026-08-15";
+        : /^0\.3\.15$/.test(LOADED_EXTENSION_VERSION) ? "2026-08-13"
+          : /^0\.4\.[0-3]$/.test(LOADED_EXTENSION_VERSION) || !LOADED_EXTENSION_VERSION
+            ? "2026-08-15" : "2026-09-03";
 
 const DISCUSSION_TAB_PATTERNS = [
   "https://boardgamegeek.com/forum/*", "https://boardgamegeek.com/thread/*",
   "https://boardgamegeek.com/geeklist/*", "https://boardgamegeek.com/image/*",
   "https://boardgamegeek.com/video/*", "https://boardgamegeek.com/filepage/*",
-  "https://boardgamegeek.com/blog/*/blogpost/*"
+  "https://boardgamegeek.com/blog/*/blogpost/*",
+  "https://boardgamegeek.com/subscriptions", "https://boardgamegeek.com/subscriptions/"
 ];
 const DISCUSSION_PATH_PATTERNS = [
   /^\/forum\//, /^\/thread\//, /^\/geeklist\//, /^\/image\//, /^\/video\//,
-  /^\/filepage\//, /^\/blog\/[^/]+\/blogpost\//
+  /^\/filepage\//, /^\/blog\/[^/]+\/blogpost\//, /^\/subscriptions\/?$/
 ];
 
 class AuthorizationChangedError extends Error {}
@@ -96,6 +99,35 @@ function normalizeUsername(value) {
     ? username : "";
 }
 
+function normalizeAvatarId(value) {
+  if (value === "") return "";
+  if (typeof value !== "string") return null;
+  const normalized = value.toLocaleLowerCase("en-US");
+  return /^avatar_(?:id)?[1-9]\d{0,15}\.(?:gif|jpe?g|png|webp)$/.test(normalized)
+    ? normalized : null;
+}
+
+function avatarIdFromProfile(profile) {
+  const urls = profile?.avatar?.urls;
+  if (!urls || typeof urls !== "object" || Array.isArray(urls)) return "";
+  for (const value of Object.values(urls)) {
+    if (typeof value !== "string" || !value || value.length > 8192) continue;
+    let decoded = value;
+    for (let pass = 0; pass < 3; pass += 1) {
+      try {
+        const next = decodeURIComponent(decoded);
+        if (next === decoded) break;
+        decoded = next;
+      } catch (_error) { break; }
+    }
+    const match = decoded.match(
+      /\/avatars\/[^?#\s]*?(avatar_(?:id)?[1-9]\d{0,15}\.(?:gif|jpe?g|png|webp))(?:[?#\s]|$)/i
+    );
+    if (match) return match[1].toLocaleLowerCase("en-US");
+  }
+  return "";
+}
+
 function normalizeAuthorization(value) {
   return typeof value === "string" && value.length > 9 && value.length <= 8192 &&
     value.startsWith("GeekAuth ") && value === value.trim() &&
@@ -122,9 +154,12 @@ function sanitizeProfileCache(rawCache, currentIds, now = Date.now()) {
   for (const id of currentIds) {
     const entry = rawCache[id];
     const username = normalizeUsername(entry?.username);
+    const avatarId = normalizeAvatarId(entry?.avatarId);
     const updatedAt = Number(entry?.updatedAt);
-    if (username && Number.isFinite(updatedAt) && updatedAt <= now &&
-        now - updatedAt < PROFILE_CACHE_MAX_AGE_MS) cache[id] = { username, updatedAt };
+    if (username && avatarId !== null && Number.isFinite(updatedAt) && updatedAt <= now &&
+        now - updatedAt < PROFILE_CACHE_MAX_AGE_MS) {
+      cache[id] = { username, avatarId, updatedAt };
+    }
   }
   return cache;
 }
@@ -283,6 +318,7 @@ async function resolveBlockedProfiles(userIds, rawCache, authorization, signal, 
   const cached = sanitizeProfileCache(rawCache, userIds, now);
   const profileCache = { ...cached };
   const names = new Array(userIds.length);
+  const avatars = new Array(userIds.length);
   let cursor = 0;
   let unresolvedCount = 0;
   async function worker() {
@@ -290,13 +326,19 @@ async function resolveBlockedProfiles(userIds, rawCache, authorization, signal, 
       const index = cursor++;
       const id = userIds[index];
       if (signal.aborted) throw abortError();
-      if (cached[id]) { names[index] = cached[id].username; continue; }
+      if (cached[id]) {
+        names[index] = cached[id].username;
+        avatars[index] = cached[id].avatarId;
+        continue;
+      }
       try {
         const profile = await fetchApi(apiUrl(`user/${id}`), "GET", authorization, signal, budget);
         const username = normalizeUsername(profile?.username);
         if (username) {
+          const avatarId = avatarIdFromProfile(profile);
           names[index] = username;
-          profileCache[id] = { username, updatedAt: now };
+          avatars[index] = avatarId;
+          profileCache[id] = { username, avatarId, updatedAt: now };
         } else unresolvedCount += 1;
       } catch (error) {
         if (isAbortError(error) || error instanceof SyncBudgetExceededError) throw error;
@@ -314,7 +356,8 @@ async function resolveBlockedProfiles(userIds, rawCache, authorization, signal, 
     seen.add(key);
     return true;
   }).sort((a, b) => a.localeCompare(b));
-  return { usernames, unresolvedCount, profileCache };
+  const avatarIds = [...new Set(avatars.filter(Boolean))].sort();
+  return { usernames, avatarIds, unresolvedCount, profileCache };
 }
 
 function validateSubscriptionPage(payload) {
@@ -442,7 +485,7 @@ async function performSync(initial, authorization, signal, generation) {
     : { enabled: false, state: "disabled", hiddenCount: userIds.length,
         subscriptionBlockedCount: null, addedCount: 0, failedCount: 0 };
   return {
-    publicResult: { status: "ready", usernames: profiles.usernames,
+    publicResult: { status: "ready", usernames: profiles.usernames, avatarIds: profiles.avatarIds,
       unresolvedCount: profiles.unresolvedCount, syncedAt: new Date().toISOString() },
     profileCache: profiles.profileCache, subscriptionLinking
   };
@@ -717,7 +760,7 @@ function updateContentStatus(status, sessionIsCurrent = () => true) {
         !hasCurrentConsent(stored?.[CONSENT_KEY])) return false;
     const current = stored?.[CONTENT_STATE_KEY];
     if (current?.schemaVersion !== CONTENT_STATE_SCHEMA_VERSION ||
-        !Array.isArray(current.usernames)) return false;
+        !Array.isArray(current.usernames) || !Array.isArray(current.avatarIds)) return false;
     const next = {
       ...current,
       status: { ...(current.status && typeof current.status === "object" ? current.status : {}),
@@ -750,6 +793,7 @@ function replaceCanonicalContentState(payload, generation, signal) {
       // identity keeps compare-and-remove rollback exact across restarts.
       canonicalWriteId: crypto.randomUUID(),
       usernames: payload.usernames,
+      avatarIds: payload.avatarIds,
       status: {
         ...(currentStatus && typeof currentStatus === "object" ? currentStatus : {}),
         blockedCount: payload.usernames.length,

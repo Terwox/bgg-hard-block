@@ -86,8 +86,8 @@ version.
 | --- | --- | --- |
 | `GeekAuth` authorization header | ephemeral Chrome request-event, MAIN-world fallback, and background-worker memory | only back to `api.geekdo.com`, where BGG already sends it |
 | Consent record and subscription-linking option | `chrome.storage.local` | no |
-| Blocked usernames, result status, and counts | `chrome.storage.local` | no |
-| Profile ID→username cache | `chrome.storage.local`; entries older than 30 days are never reused and the next successful sync prunes stale/non-current IDs | no |
+| Blocked usernames, custom-avatar identifiers, result status, and counts | `chrome.storage.local` | no |
+| Profile ID→username/custom-avatar cache | `chrome.storage.local`; entries older than 30 days are never reused and the next successful sync prunes stale/non-current IDs | no |
 | Subscription-linking status | `chrome.storage.local` | no |
 | Reply drafts | never stored; sanitized in place | no |
 
@@ -96,24 +96,25 @@ Full disclosure text: [PRIVACY.md](PRIVACY.md).
 ## Where it runs
 
 Filtering and BGG-data code runs only on canonical HTTPS URLs for forum indexes,
-forum threads, GeekLists, images, videos, files, and individual blog posts. It
+forum threads, GeekLists, images, videos, files, individual blog posts, and the
+subscriptions feed. It
 does not activate filtering or credential capture on BGG's home page, game pages,
 collection, store, account pages, or any other site. After a single-page route
 leaves a supported page, a tiny local teardown function may run on the destination
 BGG page only to remove previously installed behavior; it reads no page data and
 makes no network request.
 
-If BGG enters a supported discussion through an in-page route change, the
-background worker injects that same discussion-only code at the new URL; this
+If BGG enters a supported page through an in-page route change, the
+background worker injects that same path-limited code at the new URL; this
 covers routes that do not create a new document for Chrome's declarative path
 matching.
 
 Chrome represents host permissions at the origin level and ignores their path
 component. The extension therefore declares the canonical BoardGameGeek origin
-for path-limited discussion integration and the canonical Geekdo API origin for
+for path-limited integration and the canonical Geekdo API origin for
 background synchronization. It uses `scripting` for document-bound attachment
 and `webRequest` only to observe the existing authorization header on Geekdo API
-requests initiated by an active BGG discussion document. It does **not** request
+requests initiated by an active supported BGG document. It does **not** request
 `tabs`, `webNavigation`, or `history` access.
 
 ## Subscription linking
@@ -134,8 +135,8 @@ available and untouched:
 BGG's frontend requests `https://api.geekdo.com/api/userblock`. After consent,
 the background worker observes the `GeekAuth` header that BGG itself adds through
 Chrome's read-only request event. The listener is limited to `api.geekdo.com/api/*`,
-requires BGG as the initiator, validates the active tab is on a supported
-discussion URL, verifies stored consent for each observed request, and binds each
+requires BGG as the initiator, validates the active tab is on a supported URL,
+verifies stored consent for each observed request, and binds each
 value to the exact tab and document. A short
 MAIN-world bridge remains as a document-bound fallback. The value never enters
 the DOM, extension storage, logs, or the isolated content script, and an unused
@@ -149,29 +150,32 @@ data. Redirects and unexpected methods, paths, queries, identifiers, response
 sizes, request totals, or pagination destinations are refused. Consent and options are checked
 again before each subscription addition and before cache/status persistence or
 the public response. The authorization reference is cleared when synchronization
-settles; content receives only public usernames and status.
+settles; content receives only public usernames, custom-avatar identifiers, and status.
 
 The MAIN-world wrapper also notices a native, non-`GET` Hidden Users request and
 emits a data-free event bound to that document's random session nonce. An
 isolated relay can forward only that nonce and a fixed revocation message. The
 worker accepts it only from the matching active top-level document and uses it
 only to pause optional subscription linking; it grants no read or write
-authority. A later supported discussion-page load retries linking from fresh
+authority. A later supported-page load retries linking from fresh
 Hidden Users and subscription-block reads.
 
-A `MutationObserver` applies the filter to posts, thread listings, and thumbs
-popovers loaded dynamically. On forum indexes, blocked thread-author and
+A `MutationObserver` applies the filter to posts, thread listings, thumbs
+popovers, and subscription-feed images loaded dynamically. On forum indexes, blocked thread-author and
 latest-reply profile links and their avatar-popup triggers become plain
 **Blocked** labels with no profile card on hover; thread titles, dates,
 statistics, and navigation remain intact. In a post's thumbs popover, each
 blocked giver likewise becomes an inert **Blocked** label while allowed givers
-remain normal profile links. Profile ID-to-name mappings are cached in
+remain normal profile links. On `/subscriptions`, a feed image is hidden when
+its stable avatar filename matches one published by a user on the synced Hidden
+Users list; ordinary thread and GeekList artwork, the row itself, and the small
+item-type badge remain visible. Profile ID-to-name and custom-avatar mappings are cached in
 `chrome.storage.local` for up to 30 days to avoid repeating every public profile
 request on every page. Each successful synchronization retains mappings only
 for IDs still on the current Hidden Users list. The obsolete BGG-origin
 `localStorage` cache is removed.
 
-The discussion page stays hidden until the first filtering pass completes, so
+The supported page stays hidden until the first filtering pass completes, so
 blocked content does not flash onscreen. Live synchronization reveals it
 immediately; otherwise it is revealed no later than 500 ms after
 `DOMContentLoaded`. After that initial reveal, each newly inserted post,
@@ -226,7 +230,7 @@ default-on and opt-out subscription linking, page reveal behavior, lazy post and
 quotation insertion after the initial reveal, forum-index and thumbs-list name
 redaction,
 progressive hydration, per-item paint quarantine, full-sweep recovery,
-quote-composer sanitization, and status storage.
+quote-composer sanitization, subscription-avatar matching, and status storage.
 
 An optional networked smoke test loads the unpacked extension into a disposable,
 signed-out Chromium profile, seeds a temporary cached username, and verifies
@@ -245,6 +249,16 @@ fallback verifies extension behavior, not current live-site compatibility.
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
+
+## v0.4.4
+
+- Hides a blocked user's custom avatar from rows on BGG's subscriptions feed
+  while retaining the row, item-type badge, and ordinary thread/GeekList art.
+- Resolves stable avatar filenames from the same public BGG profiles already
+  used for blocked usernames; neither image analysis nor a new network origin
+  is required.
+- Adds subscriptions-page scope, pre-paint quarantine for lazily hydrated feed
+  images, cache migration, and runtime regression coverage.
 
 ## v0.4.3
 

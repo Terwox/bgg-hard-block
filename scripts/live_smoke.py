@@ -124,8 +124,9 @@ async def seed_cached_block_list(websocket_url: str) -> None:
         expression = f"""
           chrome.storage.local.set({{
             bggHardBlockerState: {{
-              schemaVersion: 1,
+              schemaVersion: 2,
               usernames: [{json.dumps(TEST_USERNAME)}],
+              avatarIds: [],
               status: {{ lastSync: '2026-08-04T00:00:00.000Z' }}
             }}
           }}).then(() => true)

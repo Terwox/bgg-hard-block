@@ -34,7 +34,8 @@
  * ## Privacy note
  *
  * This script never sees the `GeekAuth` header or BGG user IDs. It accepts only
- * the public usernames and status returned through extension messaging after
+ * the public usernames, custom-avatar identifiers, and status returned through
+ * extension messaging after
  * the background worker validates BGG's API response. No page-writable data
  * channel participates in filtering or persistence. See `src/background.js`
  * for that trust boundary.
@@ -47,7 +48,7 @@
       const url = new URL(urlText);
       return url.origin === "https://boardgamegeek.com" && !url.username && !url.password && [
         /^\/forum\//, /^\/thread\//, /^\/geeklist\//, /^\/image\//, /^\/video\//,
-        /^\/filepage\//, /^\/blog\/[^/]+\/blogpost\//
+        /^\/filepage\//, /^\/blog\/[^/]+\/blogpost\//, /^\/subscriptions\/?$/
       ].some((pattern) => pattern.test(url.pathname));
     } catch (_error) {
       return false;
@@ -90,12 +91,14 @@
           ? "2026-08-10"
           : /^0\.3\.15$/.test(LOADED_EXTENSION_VERSION)
             ? "2026-08-13"
-            : "2026-08-15";
+            : /^0\.4\.[0-3]$/.test(LOADED_EXTENSION_VERSION) || !LOADED_EXTENSION_VERSION
+              ? "2026-08-15"
+              : "2026-09-03";
 
   const BRIDGE_MESSAGE_TYPE = "bgg-hard-blocker:initialize-bridge:v1";
   const STATUS_MESSAGE_TYPE = "bgg-hard-blocker:update-content-status:v1";
   const STORAGE_KEY = "bggHardBlockerState";
-  const STATE_SCHEMA_VERSION = 1;
+  const STATE_SCHEMA_VERSION = 2;
   const MAX_BLOCKED_USERS = 5000;
   /** Set on <html> to release the CSS hide. */
   const READY_ATTRIBUTE = "data-bgg-hard-blocker-ready";
@@ -111,10 +114,14 @@
     'gg-thread-listing a[href*="/profile/"]',
     'gg-reactions-list-popover gg-thumbs-list a[href*="/profile/"]'
   ].join(", ");
+  const SUBSCRIPTION_IMAGE_SELECTOR = "gg-notice .item-image";
+  const HIDDEN_SUBSCRIPTION_AVATAR_ATTRIBUTE =
+    "data-bgg-hard-blocker-hidden-subscription-avatar";
   const FILTERABLE_SELECTOR = [
     POST_SELECTOR,
     QUOTE_SELECTOR,
-    REDACTABLE_PROFILE_LINK_SELECTOR
+    REDACTABLE_PROFILE_LINK_SELECTOR,
+    SUBSCRIPTION_IMAGE_SELECTOR
   ].join(", ");
   const QUOTE_BUTTON_SELECTOR = "gg-post button.post-btn";
   const QUOTE_EDITOR_SELECTOR = "textarea.post-textarea[name=\"text\"]";
@@ -194,6 +201,8 @@
       .forEach((element) => element.removeAttribute(CHECKED_ATTRIBUTE));
     document.querySelectorAll("[data-bgg-hard-blocker-redacted]")
       .forEach((element) => element.removeAttribute("data-bgg-hard-blocker-redacted"));
+    document.querySelectorAll(`[${HIDDEN_SUBSCRIPTION_AVATAR_ATTRIBUTE}]`)
+      .forEach((element) => element.removeAttribute(HIDDEN_SUBSCRIPTION_AVATAR_ATTRIBUTE));
     for (const attribute of [RUNNING_ATTRIBUTE, QUARANTINE_ATTRIBUTE]) {
       document.documentElement.removeAttribute(attribute);
     }
@@ -233,6 +242,7 @@
   }
 
   let blockedUsernames = core.makeBlockedSet([]);
+  let blockedAvatarIds = new Set();
   let hasBlockList = false;
   let blockListRevision = 0;
   let documentFilteredRevision = -1;
@@ -327,6 +337,17 @@
         link.setAttribute(CHECKED_ATTRIBUTE, "");
       }
     }
+
+    for (const imageRegion of collectElements(root, SUBSCRIPTION_IMAGE_SELECTOR)) {
+      const avatarId = core.subscriptionAvatarId(imageRegion);
+      if (
+        avatarId !== null &&
+        (!avatarId || !blockedAvatarIds.has(avatarId) ||
+          imageRegion.hasAttribute(HIDDEN_SUBSCRIPTION_AVATAR_ATTRIBUTE))
+      ) {
+        imageRegion.setAttribute(CHECKED_ATTRIBUTE, "");
+      }
+    }
   }
 
   /** Discard decisions made from attribution that a mutation may have changed. */
@@ -345,6 +366,9 @@
     for (const link of collectElements(root, REDACTABLE_PROFILE_LINK_SELECTOR)) {
       link.removeAttribute(CHECKED_ATTRIBUTE);
     }
+    for (const imageRegion of collectElements(root, SUBSCRIPTION_IMAGE_SELECTOR)) {
+      imageRegion.removeAttribute(CHECKED_ATTRIBUTE);
+    }
   }
 
   function filterCandidates(root) {
@@ -353,7 +377,8 @@
       ...collectElements(root, QUOTE_SELECTOR),
       ...collectElements(root, REDACTABLE_PROFILE_LINK_SELECTOR).map((link) =>
         link.closest("gg-avatar-popup-trigger, gg-username-link") || link
-      )
+      ),
+      ...collectElements(root, SUBSCRIPTION_IMAGE_SELECTOR)
     ]);
   }
 
@@ -367,7 +392,7 @@
     // filter, so these internal marker updates cannot create observer loops.
     invalidateInspectedContent(root);
     const candidates = filterCandidates(root);
-    const result = core.filterDom(root, blockedUsernames);
+    const result = core.filterDom(root, blockedUsernames, blockedAvatarIds);
     for (const node of candidates) {
       if (!node.isConnected) filterRemovedNodes.add(node);
     }
@@ -379,7 +404,7 @@
       documentFilteredRevision = blockListRevision;
     }
 
-    if (result.posts || result.quotes || result.profileNames) {
+    if (result.posts || result.quotes || result.profileNames || result.subscriptionAvatars) {
       scheduleStatusWrite();
     }
   }
@@ -474,7 +499,7 @@
    * be missing a recently blocked user — that case is covered by the deadline
    * timer instead.
    *
-   * @param {{usernames: string[], syncedAt?: string, unresolvedCount?: number,
+   * @param {{usernames: string[], avatarIds?: string[], syncedAt?: string, unresolvedCount?: number,
    *   unresolved?: unknown[]}} payload
    * @param {"cache"|"live"} nextSource
    */
@@ -484,6 +509,14 @@
     }
 
     blockedUsernames = core.makeBlockedSet(payload.usernames);
+    blockedAvatarIds = new Set(
+      Array.isArray(payload.avatarIds)
+        ? payload.avatarIds.filter((value) =>
+          typeof value === "string" &&
+          /^avatar_(?:id)?[1-9]\d{0,15}\.(?:gif|jpe?g|png|webp)$/.test(value)
+        ).map((value) => value.toLocaleLowerCase("en-US"))
+        : []
+    );
     hasBlockList = true;
     blockListRevision += 1;
     source = nextSource;
@@ -589,9 +622,18 @@
 
   function sanitizeBlockListPayload(payload) {
     const usernames = sanitizeUsernames(payload?.usernames);
+    const avatarIds = payload?.avatarIds === undefined
+      ? []
+      : Array.isArray(payload.avatarIds) &&
+          payload.avatarIds.length <= MAX_BLOCKED_USERS &&
+          payload.avatarIds.every((value) => typeof value === "string" &&
+            /^avatar_(?:id)?[1-9]\d{0,15}\.(?:gif|jpe?g|png|webp)$/i.test(value))
+        ? [...new Set(payload.avatarIds.map((value) => value.toLocaleLowerCase("en-US")))]
+        : null;
     if (
       payload?.status !== "ready" ||
       !usernames ||
+      !avatarIds ||
       !Number.isInteger(payload.unresolvedCount) ||
       payload.unresolvedCount < 0 ||
       payload.unresolvedCount > MAX_BLOCKED_USERS ||
@@ -604,6 +646,7 @@
     return {
       status: "ready",
       usernames,
+      avatarIds,
       unresolvedCount: payload.unresolvedCount,
       syncedAt: payload.syncedAt
     };
@@ -754,6 +797,7 @@
   // Attribute filtering is narrow on purpose. These are the attributes that
   // can change a filtering decision after a post is already in the DOM:
   // `content`/`itemprop` (microdata author), `data-username` (quote author),
+  // `src`/`srcset` (subscription portrait hydration),
   // `href` (profile/reaction link hydration), `ngbtooltip` (native blocked
   // marker), and `class` (Angular turning a generic shell into filterable
   // markup).
@@ -766,7 +810,9 @@
       "data-username",
       "href",
       "itemprop",
-      "ngbtooltip"
+      "ngbtooltip",
+      "src",
+      "srcset"
     ],
     characterData: true,
     childList: true,
@@ -785,11 +831,18 @@
         const cachedLastSync = cached?.status?.lastSync;
         const validLastSync = cachedLastSync === undefined ||
           (typeof cachedLastSync === "string" && Number.isFinite(Date.parse(cachedLastSync)));
+        const cachedAvatarIds = Array.isArray(cached?.avatarIds) &&
+          cached.avatarIds.length <= MAX_BLOCKED_USERS &&
+          cached.avatarIds.every((value) => typeof value === "string" &&
+            /^avatar_(?:id)?[1-9]\d{0,15}\.(?:gif|jpe?g|png|webp)$/.test(value))
+          ? cached.avatarIds
+          : null;
         if (!hasBlockList && cached?.schemaVersion === STATE_SCHEMA_VERSION &&
-            cachedUsernames && validLastSync) {
+            cachedUsernames && cachedAvatarIds && validLastSync) {
           applyBlockList(
             {
               usernames: cachedUsernames,
+              avatarIds: cachedAvatarIds,
               syncedAt: cachedLastSync,
               unresolved: []
             },

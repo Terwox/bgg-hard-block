@@ -157,6 +157,37 @@
         </gg-thumbs-list>
       </gg-reactions-list-popover>
 
+      <gg-notice id="blocked-subscription-direct-row">
+        <div class="item-image" id="blocked-subscription-direct-avatar">
+          <gg-image><img alt="thread image" src="https://cf.geekdo-images.com/avatars/hash/fit-in/64x64/avatar_id201399.jpg"></gg-image>
+          <span class="item-icon">Thread</span>
+        </div>
+      </gg-notice>
+
+      <gg-notice id="blocked-subscription-nested-row">
+        <div class="item-image" id="blocked-subscription-nested-avatar">
+          <gg-image><img alt="thread image" src="https://cf.geekdo-images.com/hash/img/hash/100x100/https%3A%2F%2Fcf.geekdo-static.com%2Favatars%2Favatar_1274574771.jpg"></gg-image>
+        </div>
+      </gg-notice>
+
+      <gg-notice id="allowed-subscription-row">
+        <div class="item-image" id="allowed-subscription-avatar">
+          <gg-image><img alt="thread image" src="https://cf.geekdo-images.com/avatars/hash/avatar_id99999.png"></gg-image>
+        </div>
+      </gg-notice>
+
+      <gg-notice id="art-subscription-row">
+        <div class="item-image" id="art-subscription-image">
+          <gg-image><img alt="thread art" src="https://cf.geekdo-images.com/hash/100x56/pic5354812.jpg"></gg-image>
+        </div>
+      </gg-notice>
+
+      <gg-notice id="unhydrated-subscription-row">
+        <div class="item-image" id="unhydrated-subscription-image">
+          <gg-image><img alt="loading"></gg-image>
+        </div>
+      </gg-notice>
+
       <a id="unrelated-blocked-profile-link" href="/profile/Muted%20User">
         Muted User outside a redacted surface
       </a>
@@ -170,7 +201,12 @@
       originalPopup.addEventListener("mouseover", () => {
         leakedHoverCount += 1;
       });
-      const result = BggHardBlockerCore.filterDom(document, ["Muted User"]);
+      const blockedAvatarIds = ["avatar_id201399.jpg", "avatar_1274574771.jpg"];
+      const result = BggHardBlockerCore.filterDom(
+        document,
+        ["Muted User"],
+        blockedAvatarIds
+      );
       const check = (condition, message) => {
         if (!condition) failures.push(message);
       };
@@ -180,6 +216,10 @@
       check(
         result.profileNames === 3,
         `expected 3 redacted profile names, got ${result.profileNames}`
+      );
+      check(
+        result.subscriptionAvatars === 2,
+        `expected 2 hidden subscription avatars, got ${result.subscriptionAvatars}`
       );
       check(!document.getElementById("blocked-direct-post"), "blocked author's post remains");
       check(!document.getElementById("native-placeholder"), "native placeholder remains");
@@ -237,6 +277,12 @@
       check(
         BggHardBlockerCore.usernameFromProfileHref("/user/Muted%20User") === "",
         "non-profile href was interpreted as a profile username"
+      );
+      check(
+        BggHardBlockerCore.avatarIdFromUrl(
+          "https://cf.geekdo-images.com/hash/100x100/https%3A%2F%2Fcf.geekdo-static.com%2Favatars%2Favatar_id201399.jpg"
+        ) === "avatar_id201399.jpg",
+        "nested subscription avatar URL was not normalized"
       );
       for (const href of [
         "https://evil.example/profile/Muted%20User",
@@ -317,9 +363,45 @@
         ),
         "profile link outside a supported redaction surface was changed"
       );
+      for (const id of [
+        "blocked-subscription-direct-avatar",
+        "blocked-subscription-nested-avatar"
+      ]) {
+        check(
+          document.getElementById(id)?.hasAttribute(
+            "data-bgg-hard-blocker-hidden-subscription-avatar"
+          ),
+          `${id} was not hidden`
+        );
+      }
       check(
-        BggHardBlockerCore.filterDom(document, ["Muted User"]).profileNames === 0,
-        "profile-name redaction was not idempotent"
+        !document.getElementById("allowed-subscription-avatar")?.hasAttribute(
+          "data-bgg-hard-blocker-hidden-subscription-avatar"
+        ),
+        "allowed subscription avatar was hidden"
+      );
+      check(
+        !document.getElementById("art-subscription-image")?.hasAttribute(
+          "data-bgg-hard-blocker-hidden-subscription-avatar"
+        ),
+        "ordinary subscription artwork was hidden"
+      );
+      check(
+        BggHardBlockerCore.subscriptionAvatarId(
+          document.getElementById("unhydrated-subscription-image")
+        ) === null,
+        "unhydrated subscription image was treated as safe"
+      );
+      check(
+        (() => {
+          const repeated = BggHardBlockerCore.filterDom(
+            document,
+            ["Muted User"],
+            blockedAvatarIds
+          );
+          return repeated.profileNames === 0 && repeated.subscriptionAvatars === 0;
+        })(),
+        "profile-name/avatar filtering was not idempotent"
       );
 
       const nestedDraft = `[q="Allowed Reply"]

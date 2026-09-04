@@ -169,8 +169,14 @@ function validMessage(overrides = {}) {
 function defaultFetch(url, options) {
   const parsed = new URL(url);
   if (parsed.pathname === "/api/userblock") return jsonResponse({ userIds: ["1", "2"] });
-  if (parsed.pathname === "/api/user/1") return jsonResponse({ username: "Alice" });
-  if (parsed.pathname === "/api/user/2") return jsonResponse({ username: "Bob" });
+  if (parsed.pathname === "/api/user/1") return jsonResponse({
+    username: "Alice",
+    avatar: { urls: { default: "https://cf.geekdo-images.com/avatars/hash/avatar_id1001.jpg" } }
+  });
+  if (parsed.pathname === "/api/user/2") return jsonResponse({
+    username: "Bob",
+    avatar: { urls: { default: "https://cf.geekdo-images.com/avatars/hash/avatar_1002.png" } }
+  });
   if (parsed.pathname === "/api/blocks" || parsed.pathname === "/api/blocks/") {
     return jsonResponse({ feeds: [], links: [] });
   }
@@ -514,6 +520,7 @@ test("ignores hostile page-forged final fields and constructs the public result 
       profileCache: { 666: { username: "Mallory" } }, subscriptionLinking: { state: "synced" } }) }];
   const result = (await sendBridge()).response;
   assert.deepEqual(result.usernames, ["Alice", "Bob"]);
+  assert.deepEqual(result.avatarIds, ["avatar_1002.png", "avatar_id1001.jpg"]);
   assert.equal(result.unresolvedCount, 0);
   assert.notEqual(result.syncedAt, "forged");
   assert.equal(persisted()[0][PROFILE_CACHE_KEY][666], undefined);
@@ -682,11 +689,11 @@ for (const [label, payload] of malformedSubscriptionPages) {
 test("prunes expired, future, malformed, and no-longer-current cache entries", async () => {
   const now = Date.now();
   stored[PROFILE_CACHE_KEY] = {
-    1: { username: "Cached Alice", updatedAt: now - 1000 },
-    2: { username: "Expired", updatedAt: now - 31 * 24 * 60 * 60 * 1000 },
-    3: { username: "Future", updatedAt: now + 1000 },
-    4: { username: "Not current", updatedAt: now - 1000 },
-    bad: { username: "Bad", updatedAt: now - 1000 }
+    1: { username: "Cached Alice", avatarId: "avatar_id1001.jpg", updatedAt: now - 1000 },
+    2: { username: "Expired", avatarId: "", updatedAt: now - 31 * 24 * 60 * 60 * 1000 },
+    3: { username: "Future", avatarId: "", updatedAt: now + 1000 },
+    4: { username: "Not current", avatarId: "", updatedAt: now - 1000 },
+    bad: { username: "Bad", avatarId: "", updatedAt: now - 1000 }
   };
   const outcome = await sendBridge();
   assert.deepEqual(outcome.response.usernames, ["Bob", "Cached Alice"]);
@@ -1090,9 +1097,10 @@ test("status updates are ignored after current disclosure consent is withdrawn",
 test("cached filtering can report counters after authorization capture is unavailable", async () => {
   const sender = validSender({ tab: { id: 79 }, documentId: "cached-auth-unavailable" });
   stored[CONTENT_STATE_KEY] = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     canonicalGeneration: 700,
     usernames: ["Cached User"],
+    avatarIds: [],
     status: { blockedCount: 1, lastSync: "2026-08-15T00:00:00.000Z", source: "cache",
       unresolved: 0 }
   };
@@ -1115,9 +1123,10 @@ test("cached filtering can report counters after authorization capture is unavai
 test("a cache-only status message independently registers its counters-only session", async () => {
   const sender = validSender({ tab: { id: 84 }, documentId: "cache-only-status" });
   stored[CONTENT_STATE_KEY] = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     canonicalGeneration: 701,
     usernames: ["Cached User"],
+    avatarIds: [],
     status: { blockedCount: 1, lastSync: "2026-08-15T00:00:00.000Z", source: "cache",
       unresolved: 0 }
   };
@@ -1138,7 +1147,9 @@ for (const [label, tabValue, consent] of [
 ]) {
   test(`cache-only status registration rejects ${label}`, async () => {
     const sender = validSender({ tab: { id: 85 }, documentId: `rejected-${label}` });
-    stored[CONTENT_STATE_KEY] = { schemaVersion: 1, usernames: [], status: { hiddenPosts: 0 } };
+    stored[CONTENT_STATE_KEY] = {
+      schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+    };
     stored[CONSENT_KEY] = consent;
     tabLookup = () => ({ id: 85, ...tabValue });
     const before = clone(stored[CONTENT_STATE_KEY]);
@@ -1152,7 +1163,9 @@ for (const [label, tabValue, consent] of [
 
 test("consent change during exact-document confirmation prevents status registration", async () => {
   const sender = validSender({ tab: { id: 86 }, documentId: "consent-during-confirm" });
-  stored[CONTENT_STATE_KEY] = { schemaVersion: 1, usernames: [], status: { hiddenPosts: 0 } };
+  stored[CONTENT_STATE_KEY] = {
+    schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+  };
   const before = clone(stored[CONTENT_STATE_KEY]);
   statusDocumentHandler = (options) => {
     stored[CONSENT_KEY] = { granted: false, disclosureVersion: "2026-08-15" };
@@ -1169,7 +1182,9 @@ test("consent change during exact-document confirmation prevents status registra
 
 test("navigation after registration invalidates a status update waiting in the state queue", async () => {
   const sender = validSender({ tab: { id: 87 }, documentId: "queued-status-navigation" });
-  stored[CONTENT_STATE_KEY] = { schemaVersion: 1, usernames: [], status: { hiddenPosts: 0 } };
+  stored[CONTENT_STATE_KEY] = {
+    schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+  };
   injectionResult = (options) => [{ frameId: 0, documentId: options.target.documentIds[0],
     result: { status: "error", reason: "authorization-unavailable" } }];
   await sendBridge(validMessage(), sender);
@@ -1200,7 +1215,9 @@ test("navigation after registration invalidates a status update waiting in the s
 
 test("navigation during a status storage write restores the prior exact state", async () => {
   const sender = validSender({ tab: { id: 88 }, documentId: "status-set-navigation" });
-  stored[CONTENT_STATE_KEY] = { schemaVersion: 1, usernames: [], status: { hiddenPosts: 0 } };
+  stored[CONTENT_STATE_KEY] = {
+    schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+  };
   injectionResult = (options) => [{ frameId: 0, documentId: options.target.documentIds[0],
     result: { status: "error", reason: "authorization-unavailable" } }];
   await sendBridge(validMessage(), sender);
@@ -1636,9 +1653,11 @@ test("install removes unversioned content state before refreshing tabs", async (
 });
 
 test("install preserves current schema content state", async () => {
-  stored[CONTENT_STATE_KEY] = { schemaVersion: 1, usernames: ["Alice"] };
+  stored[CONTENT_STATE_KEY] = { schemaVersion: 2, usernames: ["Alice"], avatarIds: [] };
   await listeners.installed();
-  assert.deepEqual(stored[CONTENT_STATE_KEY], { schemaVersion: 1, usernames: ["Alice"] });
+  assert.deepEqual(stored[CONTENT_STATE_KEY], {
+    schemaVersion: 2, usernames: ["Alice"], avatarIds: []
+  });
 });
 
 for (const legacyValue of [null, false, 0]) {
@@ -1656,10 +1675,12 @@ test("consent migration removes legacy content state but option changes preserve
   assert.equal(Object.hasOwn(stored, CONTENT_STATE_KEY), false);
 
   reset();
-  stored[CONTENT_STATE_KEY] = { schemaVersion: 1, usernames: ["Alice"] };
+  stored[CONTENT_STATE_KEY] = { schemaVersion: 2, usernames: ["Alice"], avatarIds: [] };
   listeners.storageChanged({ [OPTIONS_KEY]: { oldValue: {}, newValue: {} } }, "local");
   await settle();
-  assert.deepEqual(stored[CONTENT_STATE_KEY], { schemaVersion: 1, usernames: ["Alice"] });
+  assert.deepEqual(stored[CONTENT_STATE_KEY], {
+    schemaVersion: 2, usernames: ["Alice"], avatarIds: []
+  });
 });
 
 (async () => {

@@ -20,11 +20,12 @@
       <section aria-labelledby="disclosure-title">
         <h2 id="disclosure-title">What the extension handles</h2>
         <ul>
-          <li><strong>Your BGG Hidden Users list</strong> and the public usernames it contains.</li>
+          <li><strong>Your BGG Hidden Users list</strong> and the public usernames and custom-avatar identifiers on those users’ public profiles.</li>
           <li><strong>Discussion content and author attributions</strong> on forum indexes, forum threads, thumbs lists, GeekLists, images, videos, files, and blog posts so blocked names, posts, placeholders, and quotations can be removed.</li>
+          <li><strong>Subscription-feed images</strong> so a thread image that is one of those blocked users’ public avatars can be hidden without removing the subscription row.</li>
           <li><strong>Text BGG inserts into the reply editor after you click Quote</strong> so quotations from blocked users, including their preceding nested quotations, can be removed before you post.</li>
           <li><strong>Your logged-in BGG authorization value</strong>, observed briefly in the page and used in temporary extension-worker memory to call only BGG’s own application programming interface (API). It is never saved, placed in the page, or exposed to the extension’s isolated content script.</li>
-          <li><strong>Local extension state</strong>, including blocked usernames, settings, synchronization times, and removal counts.</li>
+          <li><strong>Local extension state</strong>, including blocked usernames, custom-avatar identifiers, settings, synchronization times, and removal counts.</li>
         </ul>
         <p class="boundary">Nothing is sent to Terwox or to any server other than the BGG/Geekdo endpoints required for these features. Reply drafts are processed only in the open page and are never stored by the extension. There are no ads, analytics, telemetry, or remote code.</p>
       </section>

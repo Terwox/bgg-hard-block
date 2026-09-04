@@ -89,6 +89,25 @@ html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
 }
 
 /*
+ * Subscription-feed images are attributed asynchronously. Hold the image
+ * component until its source is known; once a blocked avatar is confirmed,
+ * keep that image suppressed. The sibling `.item-icon` badge remains visible.
+ */
+html[data-bgg-hard-blocker-running][data-bgg-hard-blocker-quarantine]
+  gg-notice
+  .item-image:not([data-bgg-hard-blocker-checked])
+  > gg-image {
+  visibility: hidden !important;
+}
+
+html[data-bgg-hard-blocker-running]
+  gg-notice
+  .item-image[data-bgg-hard-blocker-hidden-subscription-avatar]
+  > gg-image {
+  visibility: hidden !important;
+}
+
+/*
  * A redacted name is plain text, not BGG's original profile-link,
  * avatar-popup, or username-link component. Keeping it out of pointer
  * hit-testing is a second guard against delegated behavior reintroducing a

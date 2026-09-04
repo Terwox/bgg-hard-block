@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Subscription avatar runtime test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <script>
+      globalThis.chrome = {
+        runtime: {
+          async sendMessage(message) {
+            if (message?.type === "bgg-hard-blocker:update-content-status:v1") {
+              return { status: "ok" };
+            }
+            return {
+              status: "ready",
+              usernames: ["Muted User"],
+              avatarIds: ["avatar_id201399.jpg"],
+              unresolvedCount: 0,
+              syncedAt: "2026-08-15T00:00:00.000Z"
+            };
+          }
+        },
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerConsent: {
+                  granted: true,
+                  disclosureVersion: "2026-08-15"
+                },
+                bggHardBlockerState: {
+                  schemaVersion: 2,
+                  usernames: ["Muted User"],
+                  avatarIds: ["avatar_id201399.jpg"],
+                  status: { lastSync: "2026-08-15T00:00:00.000Z" }
+                }
+              };
+            }
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <gg-notice id="blocked-row">
+      <div class="item-image" id="blocked-avatar">
+        <gg-image>
+          <img id="blocked-image" alt="thread image" src="https://cf.geekdo-images.com/hash/100x100/https%3A%2F%2Fcf.geekdo-static.com%2Favatars%2Favatar_id201399.jpg">
+        </gg-image>
+        <span class="item-icon" id="blocked-badge">Thread badge</span>
+      </div>
+    </gg-notice>
+
+    <gg-notice id="allowed-row">
+      <div class="item-image" id="allowed-avatar">
+        <gg-image>
+          <img id="allowed-image" alt="thread image" src="https://cf.geekdo-images.com/hash/100x56/pic5354812.jpg">
+        </gg-image>
+      </div>
+    </gg-notice>
+
+    <div id="dynamic-feed"></div>
+
+    <script>
+      const failures = [];
+      const check = (condition, message) => { if (!condition) failures.push(message); };
+      let shellWasQuarantined = false;
+
+      setTimeout(() => {
+        const row = document.createElement("gg-notice");
+        row.id = "dynamic-blocked-row";
+        row.innerHTML = `
+          <div class="item-image" id="dynamic-blocked-avatar">
+            <gg-image><img id="dynamic-blocked-image" alt="thread image"></gg-image>
+          </div>`;
+        document.getElementById("dynamic-feed").append(row);
+
+        requestAnimationFrame(() => {
+          const icon = document.getElementById("dynamic-blocked-avatar");
+          shellWasQuarantined =
+            getComputedStyle(icon.querySelector("gg-image")).visibility === "hidden";
+          document.getElementById("dynamic-blocked-image").src =
+            "https://cf.geekdo-images.com/avatars/hash/avatar_id201399.jpg";
+        });
+      }, 50);
+
+      setTimeout(() => {
+        check(document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"), "page was not revealed");
+        check(shellWasQuarantined, "unattributed dynamic avatar painted before hydration");
+        check(
+          document.getElementById("blocked-avatar")?.hasAttribute(
+            "data-bgg-hard-blocker-hidden-subscription-avatar"
+          ),
+          "initial blocked avatar was not classified as hidden"
+        );
+        check(
+          getComputedStyle(document.getElementById("blocked-image")).visibility === "hidden",
+          "initial blocked portrait remained visible"
+        );
+        check(
+          getComputedStyle(document.getElementById("blocked-badge")).visibility === "visible",
+          "subscription-type badge was hidden with the portrait"
+        );
+        check(
+          getComputedStyle(document.getElementById("allowed-image")).visibility === "visible",
+          "allowed portrait stayed quarantined"
+        );
+        check(
+          document.getElementById("dynamic-blocked-avatar")?.hasAttribute(
+            "data-bgg-hard-blocker-hidden-subscription-avatar"
+          ),
+          "dynamically hydrated blocked avatar was not hidden"
+        );
+        check(
+          getComputedStyle(document.getElementById("dynamic-blocked-image")).visibility === "hidden",
+          "dynamic blocked portrait remained visible"
+        );
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures });
+      }, 500);
+    </script>
+  </body>
+</html>
