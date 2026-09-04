@@ -98,7 +98,7 @@
   const BRIDGE_MESSAGE_TYPE = "bgg-hard-blocker:initialize-bridge:v1";
   const STATUS_MESSAGE_TYPE = "bgg-hard-blocker:update-content-status:v1";
   const STORAGE_KEY = "bggHardBlockerState";
-  const STATE_SCHEMA_VERSION = 2;
+  const STATE_SCHEMA_VERSION = 3;
   const MAX_BLOCKED_USERS = 5000;
   /** Set on <html> to release the CSS hide. */
   const READY_ATTRIBUTE = "data-bgg-hard-blocker-ready";

@@ -7,6 +7,7 @@ const path = require("node:path");
 const CONSENT_KEY = "bggHardBlockerConsent";
 const OPTIONS_KEY = "bggHardBlockerOptions";
 const PROFILE_CACHE_KEY = "bggHardBlockerProfileCache";
+const PROFILE_CACHE_SCHEMA_VERSION = 2;
 const SUBSCRIPTION_STATE_KEY = "bggHardBlockerSubscriptionState";
 const CONTENT_STATE_KEY = "bggHardBlockerState";
 const MESSAGE_TYPE = "bgg-hard-blocker:initialize-bridge:v1";
@@ -147,9 +148,12 @@ function defaultStored(overrides = {}) {
   return {
     [CONSENT_KEY]: currentConsent,
     [OPTIONS_KEY]: { linkSubscriptionBlocks: true },
-    [PROFILE_CACHE_KEY]: {},
+    [PROFILE_CACHE_KEY]: versionedProfileCache(),
     ...overrides
   };
+}
+function versionedProfileCache(profiles = {}) {
+  return { schemaVersion: PROFILE_CACHE_SCHEMA_VERSION, profiles };
 }
 function readyResult(overrides = {}) { return { status: "ready", authorization: TOKEN, ...overrides }; }
 function validSender(overrides = {}) {
@@ -523,7 +527,7 @@ test("ignores hostile page-forged final fields and constructs the public result 
   assert.deepEqual(result.avatarIds, ["avatar_1002.png", "avatar_id1001.jpg"]);
   assert.equal(result.unresolvedCount, 0);
   assert.notEqual(result.syncedAt, "forged");
-  assert.equal(persisted()[0][PROFILE_CACHE_KEY][666], undefined);
+  assert.equal(persisted()[0][PROFILE_CACHE_KEY].profiles[666], undefined);
 });
 
 test("uses only exact trusted fetch options and constructed allowlisted URLs", async () => {
@@ -688,17 +692,38 @@ for (const [label, payload] of malformedSubscriptionPages) {
 
 test("prunes expired, future, malformed, and no-longer-current cache entries", async () => {
   const now = Date.now();
-  stored[PROFILE_CACHE_KEY] = {
+  stored[PROFILE_CACHE_KEY] = versionedProfileCache({
     1: { username: "Cached Alice", avatarId: "avatar_id1001.jpg", updatedAt: now - 1000 },
     2: { username: "Expired", avatarId: "", updatedAt: now - 31 * 24 * 60 * 60 * 1000 },
     3: { username: "Future", avatarId: "", updatedAt: now + 1000 },
     4: { username: "Not current", avatarId: "", updatedAt: now - 1000 },
     bad: { username: "Bad", avatarId: "", updatedAt: now - 1000 }
-  };
+  });
   const outcome = await sendBridge();
   assert.deepEqual(outcome.response.usernames, ["Bob", "Cached Alice"]);
-  assert.deepEqual(Object.keys(persisted()[0][PROFILE_CACHE_KEY]).sort(), ["1", "2"]);
+  assert.deepEqual(Object.keys(persisted()[0][PROFILE_CACHE_KEY].profiles).sort(), ["1", "2"]);
   assert.equal(calls.fetches.some((call) => call.url.endsWith("/api/user/1")), false);
+});
+
+test("refetches profiles from an unversioned cache created before avatar extraction", async () => {
+  stored[PROFILE_CACHE_KEY] = {
+    1: { username: "Cached Alice", updatedAt: Date.now() },
+    2: { username: "Cached Bob", updatedAt: Date.now() }
+  };
+  stored[CONTENT_STATE_KEY] = {
+    schemaVersion: 2, usernames: ["Cached Alice", "Cached Bob"], avatarIds: []
+  };
+
+  const outcome = await sendBridge();
+
+  assert.deepEqual(outcome.response.avatarIds, ["avatar_1002.png", "avatar_id1001.jpg"]);
+  assert.deepEqual(calls.fetches.filter((call) => /\/api\/user\/[12]$/.test(call.url))
+    .map((call) => call.url).sort(), [
+    "https://api.geekdo.com/api/user/1", "https://api.geekdo.com/api/user/2"
+  ]);
+  assert.equal(stored[PROFILE_CACHE_KEY].schemaVersion, PROFILE_CACHE_SCHEMA_VERSION);
+  assert.deepEqual(Object.keys(stored[PROFILE_CACHE_KEY].profiles).sort(), ["1", "2"]);
+  assert.equal(stored[CONTENT_STATE_KEY].schemaVersion, 3);
 });
 
 test("adds only missing hidden IDs and counts only hidden intersections", async () => {
@@ -1097,7 +1122,7 @@ test("status updates are ignored after current disclosure consent is withdrawn",
 test("cached filtering can report counters after authorization capture is unavailable", async () => {
   const sender = validSender({ tab: { id: 79 }, documentId: "cached-auth-unavailable" });
   stored[CONTENT_STATE_KEY] = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     canonicalGeneration: 700,
     usernames: ["Cached User"],
     avatarIds: [],
@@ -1123,7 +1148,7 @@ test("cached filtering can report counters after authorization capture is unavai
 test("a cache-only status message independently registers its counters-only session", async () => {
   const sender = validSender({ tab: { id: 84 }, documentId: "cache-only-status" });
   stored[CONTENT_STATE_KEY] = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     canonicalGeneration: 701,
     usernames: ["Cached User"],
     avatarIds: [],
@@ -1148,7 +1173,7 @@ for (const [label, tabValue, consent] of [
   test(`cache-only status registration rejects ${label}`, async () => {
     const sender = validSender({ tab: { id: 85 }, documentId: `rejected-${label}` });
     stored[CONTENT_STATE_KEY] = {
-      schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+      schemaVersion: 3, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
     };
     stored[CONSENT_KEY] = consent;
     tabLookup = () => ({ id: 85, ...tabValue });
@@ -1164,7 +1189,7 @@ for (const [label, tabValue, consent] of [
 test("consent change during exact-document confirmation prevents status registration", async () => {
   const sender = validSender({ tab: { id: 86 }, documentId: "consent-during-confirm" });
   stored[CONTENT_STATE_KEY] = {
-    schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+    schemaVersion: 3, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
   };
   const before = clone(stored[CONTENT_STATE_KEY]);
   statusDocumentHandler = (options) => {
@@ -1183,7 +1208,7 @@ test("consent change during exact-document confirmation prevents status registra
 test("navigation after registration invalidates a status update waiting in the state queue", async () => {
   const sender = validSender({ tab: { id: 87 }, documentId: "queued-status-navigation" });
   stored[CONTENT_STATE_KEY] = {
-    schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+    schemaVersion: 3, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
   };
   injectionResult = (options) => [{ frameId: 0, documentId: options.target.documentIds[0],
     result: { status: "error", reason: "authorization-unavailable" } }];
@@ -1216,7 +1241,7 @@ test("navigation after registration invalidates a status update waiting in the s
 test("navigation during a status storage write restores the prior exact state", async () => {
   const sender = validSender({ tab: { id: 88 }, documentId: "status-set-navigation" });
   stored[CONTENT_STATE_KEY] = {
-    schemaVersion: 2, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
+    schemaVersion: 3, usernames: [], avatarIds: [], status: { hiddenPosts: 0 }
   };
   injectionResult = (options) => [{ frameId: 0, documentId: options.target.documentIds[0],
     result: { status: "error", reason: "authorization-unavailable" } }];
@@ -1653,11 +1678,17 @@ test("install removes unversioned content state before refreshing tabs", async (
 });
 
 test("install preserves current schema content state", async () => {
-  stored[CONTENT_STATE_KEY] = { schemaVersion: 2, usernames: ["Alice"], avatarIds: [] };
+  stored[CONTENT_STATE_KEY] = { schemaVersion: 3, usernames: ["Alice"], avatarIds: [] };
   await listeners.installed();
   assert.deepEqual(stored[CONTENT_STATE_KEY], {
-    schemaVersion: 2, usernames: ["Alice"], avatarIds: []
+    schemaVersion: 3, usernames: ["Alice"], avatarIds: []
   });
+});
+
+test("install removes prior avatar content-state schema", async () => {
+  stored[CONTENT_STATE_KEY] = { schemaVersion: 2, usernames: ["Alice"], avatarIds: [] };
+  await listeners.installed();
+  assert.equal(Object.hasOwn(stored, CONTENT_STATE_KEY), false);
 });
 
 for (const legacyValue of [null, false, 0]) {
@@ -1675,11 +1706,11 @@ test("consent migration removes legacy content state but option changes preserve
   assert.equal(Object.hasOwn(stored, CONTENT_STATE_KEY), false);
 
   reset();
-  stored[CONTENT_STATE_KEY] = { schemaVersion: 2, usernames: ["Alice"], avatarIds: [] };
+  stored[CONTENT_STATE_KEY] = { schemaVersion: 3, usernames: ["Alice"], avatarIds: [] };
   listeners.storageChanged({ [OPTIONS_KEY]: { oldValue: {}, newValue: {} } }, "local");
   await settle();
   assert.deepEqual(stored[CONTENT_STATE_KEY], {
-    schemaVersion: 2, usernames: ["Alice"], avatarIds: []
+    schemaVersion: 3, usernames: ["Alice"], avatarIds: []
   });
 });
 
