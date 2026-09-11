@@ -1,4 +1,11 @@
 | recommendation | model suggested to use | model effort to use |
+
+> **Consumed — closed 2026-09-10.** Every row from this plan was carried into
+> `AUDIT_RESULTS.md` and recorded there as Implemented. This file is kept as the
+> record of what was planned, not as outstanding work. Live residual risks are in
+> `AUDIT_RESULTS.md` under "Remaining hypotheses and residual risks"; note it was
+> scoped against 0.3.15 while the extension is now 0.4.6.
+
 |---|---|---|
 | Map security, privacy, build, store, manifest, source, and test claims to their implementing code and existing coverage before making findings; use the map to prevent duplicate recommendations. | gpt-5.6-luna | medium |
 | Adversarially audit `src/page-bridge.js` to prove the captured `GeekAuth` authorization header cannot reach published payloads, storage, the Document Object Model, logs, error messages, or any network destination other than the intended BGG API. | gpt-5.6-sol | xhigh |

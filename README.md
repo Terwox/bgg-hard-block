@@ -250,6 +250,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
 
+## v0.4.6
+
+- Versions the stored avatar profile cache and migrates stale entries, so a
+  cache written by an earlier schema is discarded rather than read back.
+- Bumps the content state schema alongside it.
+
 ## v0.4.5
 
 - Fixes the subscriptions feed's private authorization bridge rejecting the

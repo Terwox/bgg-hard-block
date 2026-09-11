@@ -1,5 +1,12 @@
 # Audit recommendations — bgg-hard-block
 
+> **Consumed — closed 2026-09-10.** Every row from this plan was carried into
+> `AUDIT_RESULTS.md` and recorded there as Implemented. This file is kept as the
+> record of what was planned, not as outstanding work. Live residual risks are in
+> `AUDIT_RESULTS.md` under "Remaining hypotheses and residual risks"; note it was
+> scoped against 0.3.15 while the extension is now 0.4.6.
+
+
 Scoped 2026-08-15 against version 0.3.15 (main). Each row is a self-contained audit task for the bgg-hard-block Chrome extension, sized for the suggested ChatGPT 5.6 model and reasoning effort. Axes: security, human readability, speed.
 
 | recommendation | model suggested to use | model effort to use |
