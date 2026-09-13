@@ -45,16 +45,6 @@ Privacy by design:
 - data goes only to BGG/Geekdo endpoints needed for the disclosed features
 - no ads, analytics, telemetry, remote code, developer server, or third-party sharing
 
-Version 0.4.2 validates the exact requesting BGG discussion document, observes
-authentication privately on only BGG-initiated Geekdo API requests, and performs
-authenticated API requests in the extension background worker so page code
-cannot forge response data. Consent and the subscription-linking option are
-checked before credential use, before network work,
-before each subscription addition, and before any result is saved or returned.
-This security boundary requires direct host access to `api.geekdo.com`; Chrome
-may ask existing users to approve that new, narrowly scoped site access before
-the updated extension runs.
-
 BGG Hard Block is free. It is an unofficial project and is not affiliated with or
 endorsed by BoardGameGeek, LLC.
 
