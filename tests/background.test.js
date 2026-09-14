@@ -119,6 +119,9 @@ globalThis.chrome = {
     }
   },
   webRequest: {
+    OnBeforeSendHeadersOptions: {
+      REQUEST_HEADERS: "requestHeaders", EXTRA_HEADERS: "extraHeaders", BLOCKING: "blocking"
+    },
     onBeforeSendHeaders: {
       addListener(fn, filter, extraInfoSpec) {
         listeners.beforeSendHeaders = fn;
@@ -193,6 +196,8 @@ function reset() {
     if (name !== "webRequestRegistrations") values.length = 0;
   }
   stored = defaultStored();
+  // Chrome exposes chrome.permissions, but only the tests that care install it.
+  delete chrome.permissions;
   storageGetter = undefined;
   storageSetter = undefined;
   queriedTabs = [{ id: 7 }, { id: 11 }, { id: undefined }];
@@ -409,6 +414,54 @@ test("ignores observed authorization outside the exact BGG document and API orig
   listeners.tabRemoved(sender.tab.id);
 });
 
+test("ignores an observed header whose initiator and originUrl disagree", async () => {
+  const sender = validSender({ tab: { id: 47 }, documentId: "conflicting-origin-document" });
+  listeners.beforeSendHeaders({
+    url: "https://api.geekdo.com/api/thread/3477322",
+    initiator: "https://boardgamegeek.com",
+    originUrl: "https://evil.example/x",
+    tabId: sender.tab.id,
+    frameId: 0,
+    documentId: sender.documentId,
+    type: "xmlhttprequest",
+    requestHeaders: [{ name: "Authorization", value: TOKEN }]
+  });
+  await settle();
+
+  injectionResult = (options) => [{
+    frameId: 0,
+    documentId: options.target.documentIds[0],
+    result: readyResult({ authorization: "" })
+  }];
+  const outcome = await sendBridge(validMessage(), sender);
+  assert.equal(calls.fetches.length, 0);
+  assert.deepEqual(outcome.response, { status: "error", reason: "sync-failed" });
+});
+
+test("retains an observed header whose initiator and documentUrl both resolve to BGG", async () => {
+  const sender = validSender({ tab: { id: 48 }, documentId: "agreeing-origin-document" });
+  injectionResult = () => new Promise(() => {});
+  const pending = sendBridge(validMessage(), sender);
+  await settle();
+
+  listeners.beforeSendHeaders({
+    url: "https://api.geekdo.com/api/thread/3477322",
+    initiator: "https://boardgamegeek.com",
+    documentUrl: "https://boardgamegeek.com/thread/1",
+    tabId: sender.tab.id,
+    frameId: 0,
+    documentId: sender.documentId,
+    type: "xmlhttprequest",
+    requestHeaders: [{ name: "Authorization", value: TOKEN }]
+  });
+  await settle();
+
+  const outcome = await pending;
+  assert.equal(outcome.response.status, "ready");
+  assert.ok(calls.fetches.length > 0);
+  assert.ok(calls.fetches.every((call) => call.headers.Authorization === TOKEN));
+});
+
 test("returns false without responding to unrelated messages", async () => {
   let responded = false;
   assert.equal(listeners.message({ type: "other" }, validSender(), () => { responded = true; }), false);
@@ -463,11 +516,34 @@ test("rejects supported pending navigation before either document injection", as
   assert.equal(calls.fetches.length, 0);
 });
 
+test("serves a tab whose own load is still reported as loading", async () => {
+  // A tab reports "loading" while the very document that opened this session is
+  // still loading. Only a pendingUrl means the tab is leaving, so a loading tab
+  // at the sender's own URL must still be served.
+  const sender = validSender();
+  tabLookup = async () => ({ id: sender.tab.id, url: sender.url, status: "loading" });
+  assert.equal((await sendBridge(validMessage(), sender)).response.status, "ready");
+});
+
 test("requires current consent before injection", async () => {
   stored[CONSENT_KEY] = { granted: true, disclosureVersion: "old" };
   assert.deepEqual((await sendBridge()).response, { status: "error", reason: "consent-required" });
   assert.equal(bridgeInjections().length, 0);
   assert.equal(calls.fetches.length, 0);
+});
+
+test("syncs normally while the declared host permissions are granted", async () => {
+  // Chrome withholds declared host_permissions when site access is restricted
+  // to "on click"; the granted answer must leave the happy path untouched.
+  const queries = [];
+  chrome.permissions = {
+    async contains(query) { queries.push(structuredClone(query)); return true; }
+  };
+  assert.equal((await sendBridge()).response.status, "ready");
+  const manifest = require(path.join(__dirname, "..", "manifest.json"));
+  assert.deepEqual(queries, [{ origins: manifest.host_permissions }]);
+  assert.equal(bridgeInjections().length, 1);
+  assert.ok(calls.fetches.length > 0);
 });
 
 test("injects the credential observer into the exact MAIN document with only nonce", async () => {

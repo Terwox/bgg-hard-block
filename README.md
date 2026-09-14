@@ -3,9 +3,10 @@
 [![CI](https://github.com/terwox/bgg-hard-block/actions/workflows/ci.yml/badge.svg)](https://github.com/terwox/bgg-hard-block/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-BGG%20Hard%20Block-brightgreen)](https://chromewebstore.google.com/detail/bgg-hard-block/hkbnpeohgacliadddhjoddiickjnlnfl)
+[![Firefox Add-ons](https://img.shields.io/badge/Firefox%20Add--ons-listing%20pending-lightgrey)](https://addons.mozilla.org/firefox/addon/bgg-hard-block/)
 
-A Manifest V3 Chrome extension that turns BoardGameGeek's soft hide into a hard
-block on discussion pages.
+A Manifest V3 (MV3) extension for Chrome and Firefox that turns BoardGameGeek's
+soft hide into a hard block on discussion pages.
 
 BGG's own block feature replaces a hidden user's post with a **Blocked User /
 Show Anyway** placeholder, and does nothing about quotations. If someone is
@@ -29,6 +30,8 @@ BoardGameGeek, LLC.
 
 ## Install
 
+### Chrome
+
 **From the Chrome Web Store:** [BGG Hard Block](https://chromewebstore.google.com/detail/bgg-hard-block/hkbnpeohgacliadddhjoddiickjnlnfl)
 
 **From source:**
@@ -40,6 +43,38 @@ BoardGameGeek, LLC.
 5. Review the disclosure and choose **Agree and enable BGG Hard Block**
 6. Open a supported BGG discussion page while signed in
 
+### Firefox
+
+Firefox 153 or newer, desktop only.
+
+**From addons.mozilla.org (AMO):** not published yet. The listing at
+[addons.mozilla.org/firefox/addon/bgg-hard-block](https://addons.mozilla.org/firefox/addon/bgg-hard-block/)
+returns 404 until AMO review completes.
+
+**From source, temporarily:**
+
+1. Clone this repository
+2. Build the Firefox archive with `./scripts/package.sh` (on Windows, without
+   bash: `python scripts/make_zip.py . artifacts/bgg-hard-block-<version>-firefox.zip --firefox`)
+3. Open `about:debugging#/runtime/this-firefox`
+4. Choose **Load Temporary Add-on** and pick
+   `artifacts/bgg-hard-block-<version>-firefox.zip`; the file picker accepts a
+   `.zip` or `.xpi` archive as well as a manifest
+5. Review the disclosure, choose **Agree and enable BGG Hard Block**, and grant
+   site access when Firefox asks
+6. Open a supported BGG discussion page while signed in
+
+Load the archive rather than the repository folder, because Firefox always reads
+`manifest.json` from the add-on root and the repository's `manifest.json` is the
+Chrome one — `manifest.firefox.json` is swapped in under the `manifest.json`
+name only inside the Firefox package. A temporary add-on is discarded when
+Firefox restarts, so repeat these steps each session.
+
+Firefox treats host permissions as revocable. You can review or withdraw the
+extension's access to `boardgamegeek.com` and `api.geekdo.com` at any time under
+`about:addons` → **BGG Hard Block** → **Permissions**. The consent screen asks
+for that access when you agree, and does not record consent without it.
+
 Any supported tabs already open when you grant consent are refreshed
 automatically.
 
@@ -50,8 +85,9 @@ should not take that on trust, and you don't have to.
 
 **There is no build step.** No bundler, no minifier, no transpiler. The files in
 `src/` are the files that run in your browser, which means you can diff the
-extension Chrome installed against this repository directly. [BUILD.md](BUILD.md)
-walks through that, including reproducing the exact published ZIP byte-for-byte.
+extension your browser installed against this repository directly.
+[BUILD.md](BUILD.md) walks through that for Chrome and for Firefox, including
+reproducing the exact published ZIP byte-for-byte.
 
 If you'd rather just read the code, these are the five questions worth asking and
 where each is answered:
@@ -62,7 +98,7 @@ where each is answered:
 | What happens to my auth header? | [`src/background.js`](src/background.js), `observedAuthorization` and `runBridgeSession`, plus the document-bound fallback in [`src/page-bridge.js`](src/page-bridge.js) — private, ephemeral, and never stored or sent to content |
 | What is stored? | [PRIVACY.md](PRIVACY.md) has the complete map; writes are in `src/onboarding.js`, `src/options.js`, and [`src/background.js`](src/background.js). `src/content.js` can report only bounded page counters to the worker. |
 | Can it act before I consent? | [`src/content.js`](src/content.js) consent gate and [`src/background.js`](src/background.js), `initializeBridge` |
-| Where can it run at all? | [`manifest.json`](manifest.json) `content_scripts[].matches`, and `isDiscussionUrl` in [`src/background.js`](src/background.js) |
+| Where can it run at all? | [`manifest.json`](manifest.json) (and `manifest.firefox.json`, which declares the identical scope) `content_scripts[].matches`, and `isDiscussionUrl` in [`src/background.js`](src/background.js) |
 
 Every source file opens with a comment explaining its role and the reasoning
 behind anything non-obvious. [SECURITY.md](SECURITY.md) states the threat model
@@ -84,7 +120,7 @@ version.
 
 | Data | Where it lives | Leaves your machine? |
 | --- | --- | --- |
-| `GeekAuth` authorization header | ephemeral Chrome request-event, MAIN-world fallback, and background-worker memory | only back to `api.geekdo.com`, where BGG already sends it |
+| `GeekAuth` authorization header | ephemeral browser request-event, MAIN-world fallback, and background-worker memory | only back to `api.geekdo.com`, where BGG already sends it |
 | Consent record and subscription-linking option | `chrome.storage.local` | no |
 | Blocked usernames, custom-avatar identifiers, result status, and counts | `chrome.storage.local` | no |
 | Profile ID→username/custom-avatar cache | `chrome.storage.local`; entries older than 30 days are never reused and the next successful sync prunes stale/non-current IDs | no |
@@ -106,11 +142,12 @@ makes no network request.
 
 If BGG enters a supported page through an in-page route change, the
 background worker injects that same path-limited code at the new URL; this
-covers routes that do not create a new document for Chrome's declarative path
-matching.
+covers routes that do not create a new document for the browser's declarative
+path matching.
 
-Chrome represents host permissions at the origin level and ignores their path
-component. The extension therefore declares the canonical BoardGameGeek origin
+Browsers represent host permissions at the origin level and ignore their path
+component; Firefox additionally lets you revoke that access from `about:addons`.
+The extension therefore declares the canonical BoardGameGeek origin
 for path-limited integration and the canonical Geekdo API origin for
 background synchronization. It uses `scripting` for document-bound attachment
 and `webRequest` only to observe the existing authorization header on Geekdo API
@@ -134,7 +171,7 @@ available and untouched:
 
 BGG's frontend requests `https://api.geekdo.com/api/userblock`. After consent,
 the background worker observes the `GeekAuth` header that BGG itself adds through
-Chrome's read-only request event. The listener is limited to `api.geekdo.com/api/*`,
+the browser's read-only request event. The listener is limited to `api.geekdo.com/api/*`,
 requires BGG as the initiator, validates the active tab is on a supported URL,
 verifies stored consent for each observed request, and binds each
 value to the exact tab and document. A short
@@ -145,8 +182,8 @@ observation expires after five seconds.
 The background worker validates the exact sending document and current consent,
 receives the privately captured authorization value, then rechecks consent and
 the subscription option. It constructs every Geekdo URL itself and performs the authenticated API
-requests in the extension service worker, where page code cannot forge response
-data. Redirects and unexpected methods, paths, queries, identifiers, response
+requests in the extension's background script — a service worker in Chrome, an
+event page in Firefox — where page code cannot forge response data. Redirects and unexpected methods, paths, queries, identifiers, response
 sizes, request totals, or pagination destinations are refused. Consent and options are checked
 again before each subscription addition and before cache/status persistence or
 the public response. The authorization reference is cleared when synchronization
@@ -215,13 +252,19 @@ python3 -m venv ../bgg-hard-block-venv
 source ../bgg-hard-block-venv/bin/activate
 python3 -m pip install --require-hashes -r requirements-dev.txt
 ./scripts/test.sh      # full check suite; needs Chrome or Chromium
-./scripts/package.sh   # build the store ZIP into artifacts/
+./scripts/package.sh   # build both store ZIPs into artifacts/
 ```
+
+`scripts/package.sh` writes the Chrome ZIP and the Firefox ZIP; see
+[BUILD.md](BUILD.md). The Firefox steps in `scripts/test.sh` run when
+`FIREFOX_BIN` points at a Firefox 153+ binary or the script finds one, and are
+skipped otherwise. Set `CHROME_BIN` and `FIREFOX_BIN` to exercise both browsers
+in a single run.
 
 The shipped extension has no runtime dependencies. Contributors install the
 hash-locked `websockets` test dependency above. The suite drives real DOM APIs
-in headless Chromium rather than mocking them, because most of the risk here is
-whether the selectors match BGG's actual markup. It covers native BGG placeholders, full
+in a real headless browser rather than mocking them, because most of the risk
+here is whether the selectors match BGG's actual markup. It covers native BGG placeholders, full
 blocked-author posts, blocked quotations inside allowed replies, username
 normalization, authenticated API bridging, credential non-disclosure,
 pre-consent inactivity, affirmative onboarding, consent-triggered discussion-tab
@@ -246,9 +289,26 @@ Chromium a Cloudflare challenge, the test keeps the real extension loaded on the
 BGG origin and substitutes the markup shape captured during development. That
 fallback verifies extension behavior, not current live-site compatibility.
 
+The live smoke test is Chromium-only on purpose; there is no Firefox equivalent.
+Automated Firefox coverage runs through `tests/consent_gate_e2e_firefox.py` and
+`scripts/browser_test.py --browser firefox`, which drive Firefox over WebDriver
+BiDi instead.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
+
+## v0.4.7
+
+- Adds Firefox support: a second checked-in manifest, a Gecko event-page
+  background, and Firefox test and packaging lanes. The addons.mozilla.org
+  (AMO) listing is still pending; the build requires Firefox 153 or newer.
+- Asks for host access from the consent screen when the browser has not already
+  granted it, instead of assuming the permission is present.
+- Reports in the popup when site access is turned off, so a silent extension is
+  distinguishable from a broken one.
+- Leaves the disclosure text and its version unchanged, so existing Chrome users
+  are not re-prompted by this release.
 
 ## v0.4.6
 
@@ -344,6 +404,13 @@ the most resilient behavior, while quote attribution or block-list
 synchronization may require selector or API updates. Those breaks are the most
 useful thing to report — see the
 [markup break issue template](.github/ISSUE_TEMPLATE/bgg-markup-break.md).
+
+## Reporting Firefox bugs
+
+Something that misbehaves only in Firefox goes to the
+[Firefox bug template](.github/ISSUE_TEMPLATE/firefox-bug.md), which asks for the
+Firefox version, whether site access is currently granted, and the Browser
+Console output.
 
 ## License
 

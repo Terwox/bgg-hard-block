@@ -41,7 +41,6 @@ from pathlib import Path
 import ssl
 import subprocess
 import sys
-import tempfile
 import threading
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -53,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from chromium_process import (  # noqa: E402
     background_process_kwargs,
     stop_process_tree,
+    temporary_profile,
     wait_for_debug_port,
 )
 
@@ -141,6 +141,41 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
         self._send(200, DISCUSSION_PAGE.encode(), "text/html; charset=utf-8")
 
 
+# A browser that has finished with a connection just drops it, and on Windows
+# that surfaces as WinError 10054 rather than a clean close. socketserver's
+# default handler prints a full traceback for each one, which over a passing
+# run buries the failures this test exists to report.
+EXPECTED_TLS_CLOSE_MARKERS = (
+    "unexpected eof",
+    "unexpected_eof",
+    "close notify",
+    "close_notify",
+    "eof occurred",
+)
+
+
+def is_expected_disconnect(error: BaseException | None) -> bool:
+    """Whether ``error`` is a client hanging up rather than a stub defect."""
+    if isinstance(
+        error,
+        (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, ssl.SSLEOFError),
+    ):
+        return True
+    if isinstance(error, ssl.SSLError):
+        text = str(error).lower()
+        return any(marker in text for marker in EXPECTED_TLS_CLOSE_MARKERS)
+    return False
+
+
+class StubServer(http.server.ThreadingHTTPServer):
+    """The stub's server, silent about disconnects and loud about everything else."""
+
+    def handle_error(self, request, client_address) -> None:
+        if is_expected_disconnect(sys.exc_info()[1]):
+            return
+        super().handle_error(request, client_address)
+
+
 def make_certificate(directory: Path) -> tuple[Path, Path]:
     """Create a self-signed cert covering both stubbed hosts."""
     key = directory / "stub-key.pem"
@@ -160,7 +195,7 @@ def make_certificate(directory: Path) -> tuple[Path, Path]:
 
 
 def start_stub_server(key: Path, cert: Path) -> tuple[http.server.ThreadingHTTPServer, int]:
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), StubHandler)
+    server = StubServer(("127.0.0.1", 0), StubHandler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=str(cert), keyfile=str(key))
     server.socket = context.wrap_socket(server.socket, server_side=True)
@@ -362,8 +397,7 @@ def main() -> int:
     failures: list[str] = []
     report: dict = {}
 
-    with tempfile.TemporaryDirectory(prefix="bgg-consent-e2e-") as workdir:
-        work = Path(workdir)
+    with temporary_profile("bgg-consent-e2e-") as work:
         key, cert = make_certificate(work)
         server, stub_port = start_stub_server(key, cert)
         profile_dir = work / "profile"

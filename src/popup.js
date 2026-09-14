@@ -86,6 +86,34 @@
     return;
   }
 
+  // Firefox MV3 treats `host_permissions` as optional: a user who agreed to the
+  // disclosure can still turn site access off in about:addons, and Chrome
+  // withholds the same origins when site access is restricted to "on click".
+  // Nothing else reports that state — no content script runs, so the counts
+  // below simply stop moving — which leaves this popup as the only surface that
+  // can say what happened.
+  const HOST_ORIGINS = ["https://boardgamegeek.com/*", "https://api.geekdo.com/*"];
+  const HOST_ACCESS_NOTICE =
+    "Site access for boardgamegeek.com is turned off in your browser’s add-on settings. " +
+    "BGG Hard Block cannot run until it is granted again.";
+
+  if (chrome.permissions?.contains) {
+    let hostAccess = true;
+    try {
+      hostAccess = await chrome.permissions.contains({ origins: HOST_ORIGINS });
+    } catch (_error) {
+      // A check that throws is not evidence of revocation; say nothing extra.
+    }
+    if (!hostAccess) {
+      // Ahead of the status line, which still describes the last completed run.
+      const notice = document.createElement("p");
+      notice.id = "host-access-notice";
+      notice.className = "note";
+      notice.textContent = HOST_ACCESS_NOTICE;
+      elements.state.parentNode.insertBefore(notice, elements.state);
+    }
+  }
+
   // Subscription-linking summary. States originate in
   // reconcileSubscriptionBlocks in src/background.js.
   if (!linkingEnabled) {
@@ -128,6 +156,7 @@
   const labels = {
     cache: "Using the cached BGG block list",
     live: "Synced with the BGG block list",
+    "host-permission-required": "Site access for boardgamegeek.com is turned off",
     "storage-error": "Filtering without saved state",
     "sync-error": "BGG sync failed; cached filtering remains active",
     timeout: "BGG sync timed out",

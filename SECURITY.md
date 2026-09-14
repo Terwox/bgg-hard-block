@@ -53,7 +53,7 @@ Stated plainly, so you can check the claims against the source:
 
 | Data | Where it lives | Leaves the machine? |
 | --- | --- | --- |
-| `GeekAuth` authorization header | Ephemeral Chrome request-event, MAIN-world fallback, and background-worker memory | Only back to `api.geekdo.com`, which BGG's own frontend already sends it to |
+| `GeekAuth` authorization header | Ephemeral browser request-event, MAIN-world fallback, and background-worker memory | Only back to `api.geekdo.com`, which BGG's own frontend already sends it to |
 | Consent record | `chrome.storage.local`, `bggHardBlockerConsent` | No |
 | Subscription-linking option | `chrome.storage.local`, `bggHardBlockerOptions` | No |
 | Blocked usernames, result status, and counts | `chrome.storage.local`, `bggHardBlockerState` | No |
@@ -87,7 +87,8 @@ worker accepts it only from the matching active, top-level discussion document.
 This signal can suspend optional subscription linking after a native Hidden
 Users mutation starts. It cannot disclose data or authorize a request.
 
-All extension-originated authenticated requests run in the service worker, not
+All extension-originated authenticated requests run in the extension's
+background script — a service worker on Chrome, an event page on Firefox — not
 the page-controlled realm. They omit cookies, refuse redirects, and allow only:
 
 - `GET https://api.geekdo.com/api/userblock`
@@ -121,5 +122,5 @@ atomic race protection.
 
 ## Verifying a release
 
-If you want to confirm that the extension published on the Chrome Web Store is
-built from this source, see [BUILD.md](BUILD.md).
+If you want to confirm that the extension published on the Chrome Web Store or
+on addons.mozilla.org (AMO) is built from this source, see [BUILD.md](BUILD.md).

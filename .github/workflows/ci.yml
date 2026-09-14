@@ -13,6 +13,12 @@ permissions:
 env:
   PYTHON_VERSION: '3.12.10'
   NODE_VERSION: '24.19.0'
+  # The Firefox versions under test live in the firefox job's matrix, not here,
+  # because there is more than one of them. Each pins a hash taken from
+  # https://ftp.mozilla.org/pub/firefox/releases/<version>/SHA256SUMS.
+  # https://www.npmjs.com/package/addons-linter — the same engine addons.mozilla.org
+  # (AMO) runs server-side. Pinned exactly so a linter release cannot change CI.
+  ADDONS_LINTER_VERSION: '10.12.0'
 
 jobs:
   test:
@@ -40,6 +46,97 @@ jobs:
       - name: Build package
         run: ./scripts/package.sh
 
+  firefox:
+    # Both ends of the supported range: the manifest's declared
+    # browser_specific_settings.gecko.strict_min_version, so the claim is
+    # tested rather than asserted, and the current release.
+    name: Firefox ${{ matrix.version }} checks
+    runs-on: ubuntu-24.04
+    strategy:
+      # One version failing should still report the other, since "broken on the
+      # minimum only" and "broken everywhere" are different bugs.
+      fail-fast: false
+      matrix:
+        include:
+          - version: '153.0'
+            sha256: 'bfc57e7b6b4e6204b11e7e03c4b93cff708e9fb37f6b9948be243455311d82ee'
+          - version: '155.0.1'
+            sha256: '642ab731354a5ca790b894d4556dfb5028c61d0c24eb10d10e10a111a69c89bf'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install hash-locked test dependency
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      # The official tarball is not a .deb and pulls in no dependencies of its
+      # own. These are the shared libraries it dlopens on a headless
+      # ubuntu-24.04 runner; the "t64" suffixes are the 24.04 names.
+      - name: Install Firefox runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libgtk-3-0t64 \
+            libdbus-glib-1-2 \
+            libasound2t64 \
+            libxt6t64
+
+      - name: Download and verify pinned Firefox
+        env:
+          FIREFOX_VERSION: ${{ matrix.version }}
+          FIREFOX_SHA256: ${{ matrix.sha256 }}
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "firefox-${FIREFOX_VERSION}.tar.xz" \
+            "https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${FIREFOX_VERSION}.tar.xz"
+          echo "${FIREFOX_SHA256}  firefox-${FIREFOX_VERSION}.tar.xz" | sha256sum -c -
+          sudo tar --extract --xz --file "firefox-${FIREFOX_VERSION}.tar.xz" --directory /opt
+          /opt/firefox/firefox --version
+
+      # The Chrome suite already ran in the "test" job. Running ./scripts/test.sh
+      # here would repeat it, so this job invokes only the Firefox checks that
+      # test.sh adds when FIREFOX_BIN is set.
+      - name: Run Firefox consent-gate end-to-end checks
+        env:
+          FIREFOX_BIN: /opt/firefox/firefox
+        run: |
+          python tests/consent_gate_e2e_firefox.py --firefox "$FIREFOX_BIN"
+          python tests/consent_gate_e2e_firefox.py --firefox "$FIREFOX_BIN" --tab-first
+
+      - name: Run Firefox fixtures
+        env:
+          FIREFOX_BIN: /opt/firefox/firefox
+        # The same tests/fixtures.txt scripts/test.sh reads, so a new fixture
+        # never has to be listed here as well.
+        run: |
+          while read -r fixture <&3; do
+            case "$fixture" in ''|'#'*) continue ;; esac
+            python scripts/browser_test.py \
+              --browser firefox \
+              --firefox "$FIREFOX_BIN" \
+              "tests/$fixture.html"
+          done 3< tests/fixtures.txt
+
+      # Only the linter consumes these packages, and the linter reads bytes that
+      # do not depend on which Firefox ran the tests, so both steps run in one
+      # lane. ./scripts/package.sh itself is still exercised by the test job.
+      - name: Build packages
+        if: matrix.version == '155.0.1'
+        run: ./scripts/package.sh
+
+      # Lints the exact bytes that go to AMO. No --warnings-as-errors yet; the
+      # tool already exits non-zero on errors, which fails this step.
+      - name: Lint the AMO package
+        if: matrix.version == '155.0.1'
+        run: npx --yes "addons-linter@${ADDONS_LINTER_VERSION}" artifacts/bgg-hard-block-*-firefox.zip
+
   package-windows:
     name: Package on Windows
     runs-on: windows-2025
@@ -53,10 +150,17 @@ jobs:
       - name: Build Windows package
         run: python scripts/make_zip.py . artifacts/windows.zip
 
+      - name: Build Windows AMO package
+        run: python scripts/make_zip.py . artifacts/windows-firefox.zip --firefox
+
+      # Both paths share the artifacts/ prefix, so the uploaded artifact holds
+      # windows.zip and windows-firefox.zip at its root.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-package
-          path: artifacts/windows.zip
+          path: |
+            artifacts/windows.zip
+            artifacts/windows-firefox.zip
           if-no-files-found: error
 
   reproducible:
@@ -73,10 +177,15 @@ jobs:
       - name: Build Linux package
         run: python scripts/make_zip.py . artifacts/linux.zip
 
+      - name: Build Linux AMO package
+        run: python scripts/make_zip.py . artifacts/linux-firefox.zip --firefox
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-package
           path: artifacts/windows
 
       - name: Compare Windows and Linux packages
-        run: cmp artifacts/linux.zip artifacts/windows/windows.zip
+        run: |
+          cmp artifacts/linux.zip artifacts/windows/windows.zip
+          cmp artifacts/linux-firefox.zip artifacts/windows/windows-firefox.zip

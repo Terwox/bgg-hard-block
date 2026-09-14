@@ -16,19 +16,47 @@
     </script>
   </head>
   <body data-status="running">
-    <input id="link-subscription-blocks" type="checkbox" checked>
-    <button id="agree" type="button">Agree</button>
-    <p id="status"></p>
-    <script src="../src/onboarding.js"></script>
+    <div id="gate">
+      <input id="link-subscription-blocks" type="checkbox" checked>
+      <button id="agree" type="button">Agree</button>
+      <p id="status"></p>
+    </div>
     <script>
-      setTimeout(() => document.getElementById("agree").click(), 25);
-      setTimeout(() => {
-        const failures = [];
-        const saved = writes.at(-1) || {};
-        const check = (condition, message) => {
-          if (!condition) failures.push(message);
-        };
+      const failures = [];
+      const check = (condition, message) => {
+        if (!condition) failures.push(message);
+      };
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+      // src/onboarding.js is one self-calling function with no module-level
+      // state, so loading it again runs a second, independent gate. That is how
+      // this fixture exercises two permission environments on one page.
+      const loadOnboarding = () => new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "../src/onboarding.js";
+        script.onload = resolve;
+        script.onerror = () => reject(new Error("onboarding.js did not load"));
+        document.body.appendChild(script);
+      });
+
+      // A fresh button/status/checkbox, so the previous gate's listener cannot
+      // answer the next case's click and `getElementById` stays unambiguous.
+      const resetGate = () => {
+        document.getElementById("gate").innerHTML =
+          '<input id="link-subscription-blocks" type="checkbox" checked>' +
+          '<button id="agree" type="button">Agree</button>' +
+          '<p id="status"></p>';
+      };
+
+      (async () => {
+        // Case 1: no permissions API at all — host access is implicit, so the
+        // click must record consent and announce the refresh.
+        await loadOnboarding();
+        await wait(25);
+        document.getElementById("agree").click();
+        await wait(75);
+
+        const saved = writes.at(-1) || {};
         check(saved.bggHardBlockerConsent?.granted === true, "affirmative consent was not stored");
         check(
           saved.bggHardBlockerConsent?.disclosureVersion === "2026-08-15",
@@ -40,9 +68,38 @@
         );
         check(/refreshing/i.test(document.getElementById("status").textContent), "automatic refresh status was not shown");
 
+        // Case 2: site access withheld and the re-request refused — what
+        // Chrome's "On click" site-access setting and a Firefox revocation both
+        // look like from the page. The gate must fail closed: no consent record
+        // the extension could not act on, and a usable button to try again.
+        const writesBeforeRefusal = writes.length;
+        chrome.permissions = {
+          contains: async () => false,
+          request: async () => false
+        };
+        resetGate();
+        await loadOnboarding();
+        await wait(50);
+        document.getElementById("agree").click();
+        await wait(100);
+
+        const refusedStatus = document.getElementById("status").textContent;
+        check(
+          writes.length === writesBeforeRefusal,
+          "consent was recorded even though site access was withheld"
+        );
+        check(
+          document.getElementById("agree").disabled === false,
+          "the agree button was left disabled after the refusal"
+        );
+        check(
+          /access/i.test(refusedStatus) && /boardgamegeek\.com/i.test(refusedStatus),
+          "the refusal status did not mention site access"
+        );
+
         document.body.dataset.status = failures.length ? "fail" : "pass";
-        document.body.dataset.report = JSON.stringify({ failures, saved });
-      }, 100);
+        document.body.dataset.report = JSON.stringify({ failures, saved, refusedStatus });
+      })();
     </script>
   </body>
 </html>

@@ -3,8 +3,18 @@
   "name": "BGG Hard Block",
   "version": "0.4.7",
   "description": "Hard-removes hidden users from BGG discussions, hides their feed avatars, and optionally links subscription blocks.",
-  "minimum_chrome_version": "111",
   "homepage_url": "https://github.com/terwox/bgg-hard-block",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "bgg-hard-block@terwox.github.io",
+      "strict_min_version": "153.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
   "permissions": [
     "scripting",
     "storage",
@@ -15,7 +25,10 @@
     "https://api.geekdo.com/*"
   ],
   "background": {
-    "service_worker": "src/background.js"
+    "scripts": [
+      "src/page-bridge.js",
+      "src/background.js"
+    ]
   },
   "action": {
     "default_title": "BGG Hard Block",

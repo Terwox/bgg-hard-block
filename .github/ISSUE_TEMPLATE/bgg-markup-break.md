@@ -16,8 +16,8 @@ BGG URL (a public thread is ideal):
 
 ## Versions
 
-- Extension version (from `chrome://extensions`):
-- Chrome version:
+- Extension version (`chrome://extensions` in Chrome, `about:addons` in Firefox):
+- Browser and version:
 - OS:
 
 ## Markup, if you can get it
@@ -39,3 +39,5 @@ Right-click the post that was handled wrong → Inspect → right-click the
 - [ ] I have removed my username and any other personal details from the markup above
 - [ ] I have **not** included my BGG session cookie, `GeekAuth` header, or password
 - [ ] This issue describes markup and behavior, not a dispute with another BGG user
+
+If the problem happens only in Firefox, use the Firefox bug template instead.

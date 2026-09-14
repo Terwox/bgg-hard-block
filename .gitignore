@@ -1,3 +1,12 @@
 artifacts/
 *.zip
 __pycache__/
+.omc/
+*.pyc
+*.pyo
+.pytest_cache/
+.Rhistory
+.RData
+.Rproj.user/
+.ipynb_checkpoints/
+nul
