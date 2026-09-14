@@ -156,6 +156,13 @@
   // down before any retry can fire, and the service worker revalidates the tab
   // URL, the document, and consent from scratch on every attempt.
   const RETRYABLE_BRIDGE_REASONS = new Set(["stale-document", "sync-cancelled"]);
+  // Deliberately not retryable: the service worker reports this when the user
+  // has turned site access off (about:addons on Firefox, "on click" on Chrome),
+  // which no delay can undo. Named rather than folded into the generic sync
+  // failure so the status carries the cause; the popup also detects the same
+  // revocation directly, because a revoked origin usually means no content
+  // script ran at all.
+  const HOST_PERMISSION_BRIDGE_REASON = "host-permission-required";
   // Long enough for BGG's own late authenticated requests to land — the
   // service worker holds an observed header for 5s — and bounded so an
   // endlessly invalidating tab cannot loop.
@@ -652,10 +659,12 @@
     };
   }
 
-  function acceptBridgeError() {
+  function acceptBridgeError(reason) {
     if (!ensureActiveScope()) return;
     bridgeState = "error";
-    source = hasBlockList ? source : "sync-error";
+    source = hasBlockList
+      ? source
+      : reason === HOST_PERMISSION_BRIDGE_REASON ? HOST_PERMISSION_BRIDGE_REASON : "sync-error";
     updateRevealAuthorization();
     scheduleStatusWrite();
   }
@@ -694,9 +703,10 @@
           }, BRIDGE_RETRY_DELAYS_MS[attempt]);
           return;
         }
-        acceptBridgeError();
+        acceptBridgeError(payload?.reason);
       })
-      .catch(acceptBridgeError);
+      // A rejected sendMessage carries an Error, never a bridge reason.
+      .catch(() => acceptBridgeError());
   }
 
   /**

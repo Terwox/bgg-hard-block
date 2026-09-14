@@ -45,16 +45,36 @@ source ../bgg-hard-block-venv/bin/activate
 python3 -m pip install --require-hashes -r requirements-dev.txt
 ```
 
-Then load the repository directly:
+Then load the extension.
+
+In Chrome:
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. **Load unpacked**, and select the repository folder
 4. Accept the disclosure on the onboarding page that opens
 
+In Firefox 153 or newer:
+
+1. Build the Firefox archive with `./scripts/package.sh` (on Windows, without
+   bash: `python scripts/make_zip.py . artifacts/bgg-hard-block-<version>-firefox.zip --firefox`)
+2. Open `about:debugging#/runtime/this-firefox`
+3. **Load Temporary Add-on**, and pick
+   `artifacts/bgg-hard-block-<version>-firefox.zip`; the file picker accepts a
+   `.zip` or `.xpi` archive as well as a manifest
+4. Accept the disclosure and grant site access when Firefox asks for it
+5. The add-on disappears when Firefox restarts; load it again
+
+The repository folder cannot be loaded directly in Firefox: Firefox always reads
+`manifest.json` from the add-on root, and the checked-in `manifest.json` is the
+Chrome one, which declares a background service worker Firefox does not support.
+`manifest.firefox.json` is swapped in under the `manifest.json` name only inside
+the Firefox package.
+
 Chrome does not always reload the service worker when you edit files. If
 behavior looks stale, press the reload icon on the extension card and hard-reload
-the BGG tab.
+the BGG tab. Firefox has its own **Reload** button on the `about:debugging` card;
+its background event page logs to the Browser Console (Ctrl+Shift+J).
 
 ## Tests
 
@@ -67,12 +87,23 @@ than mocking them, because most of the risk in this extension is in whether the
 selectors match BGG's actual markup. Set `CHROME_BIN` if the script can't find
 one automatically.
 
+The Firefox steps need Firefox 153 or newer. Set `FIREFOX_BIN` if the script
+can't find one; without it those steps are skipped and the rest of the suite
+still runs.
+
 `scripts/test.sh` runs, in order:
 
 1. `manifest.json` JSON validity
 2. `node --check` on every file in `src/`
-3. the Node unit tests and Python release-tooling tests in `tests/`
-4. the headless-browser fixtures in `tests/*.html`
+3. the Node unit tests: `tests/background.test.js`,
+   `tests/background-firefox.test.js`, `tests/manifest-scope.test.js`,
+   `tests/manifest-firefox-scope.test.js`, `tests/page-bridge-scope.test.js`
+4. the Python release-tooling tests, `tests/test_release_tooling.py`
+5. the headless-browser fixtures in `tests/*.html`, under Chrome
+6. `tests/consent_gate_e2e.py`, once plain and once with `--tab-first`
+7. with a Firefox binary only: the same `tests/*.html` fixtures again under
+   Firefox, then `tests/consent_gate_e2e_firefox.py` plain and with
+   `--tab-first`
 
 There is also an optional networked smoke test against a live BGG thread:
 
@@ -82,7 +113,9 @@ python3 scripts/live_smoke.py --chrome /path/to/chrome
 
 Use Chromium or Chrome for Testing; current branded Chrome builds ignore the
 unpacked-extension command-line flag. The test uses a disposable signed-out
-profile and is not part of CI.
+profile and is not part of CI. It is deliberately Chromium-only; Firefox
+coverage runs through `tests/consent_gate_e2e_firefox.py` and
+`scripts/browser_test.py --browser firefox` instead.
 
 ## Adding a test
 
@@ -106,7 +139,8 @@ The most valuable bug report includes:
 
 - the BGG URL where it happened (a public thread is ideal)
 - what should have been hidden but wasn't, or vice versa
-- your Chrome version and the extension version from `chrome://extensions`
+- your browser and its version, plus the extension version — `chrome://extensions`
+  in Chrome, `about:support` and `about:addons` in Firefox
 - if you can get it, the outer HTML of the post that was handled wrong
 
 Do not paste your BGG session cookie, `GeekAuth` header, or password into an

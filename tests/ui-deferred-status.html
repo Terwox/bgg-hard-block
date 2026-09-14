@@ -45,7 +45,18 @@
         bggHardBlockerSubscriptionState: subscriptionState
       };
 
+      // Firefox lets a consented user revoke site access in about:addons. The
+      // first popup render answers "revoked"; the rerun below answers "granted".
+      const permissionQueries = [];
+      const hostAccess = { granted: false };
+
       globalThis.chrome = {
+        permissions: {
+          async contains(query) {
+            permissionQueries.push(query);
+            return hostAccess.granted;
+          }
+        },
         runtime: {
           getManifest() {
             return { version: "0.4.0" };
@@ -72,7 +83,18 @@
         if (!condition) failures.push(message);
       };
 
-      setTimeout(() => {
+      // Re-executing popup.js is how a second popup open is reproduced: the
+      // file is an IIFE that reads the DOM once, at load.
+      function rerunPopup() {
+        return new Promise((resolve) => {
+          const script = document.createElement("script");
+          script.src = "../src/popup.js";
+          script.addEventListener("load", () => setTimeout(resolve, 0));
+          document.body.appendChild(script);
+        });
+      }
+
+      setTimeout(async () => {
         const optionsStatus = document.getElementById("sync-status").textContent;
         const popupState = document.getElementById("subscription-state").textContent;
         const popupNote = document.getElementById("subscription-note").textContent;
@@ -106,13 +128,48 @@
         );
         check(innerHtmlWrites.length === 0, "UI status rendering wrote through innerHTML");
 
+        const revokedNotice = document.getElementById("host-access-notice");
+        check(Boolean(revokedNotice), "popup showed no notice while site access was revoked");
+        check(
+          /site access for boardgamegeek\.com is turned off/i.test(revokedNotice?.textContent || ""),
+          "popup notice did not say that site access is turned off"
+        );
+        check(
+          /add-on settings/i.test(revokedNotice?.textContent || ""),
+          "popup notice did not point at the browser's add-on settings"
+        );
+        // Ahead of the status line, not in place of it.
+        check(
+          revokedNotice?.nextElementSibling === document.getElementById("state"),
+          "popup notice did not render ahead of the status line"
+        );
+        // `contains` is all-or-nothing, so the query must name exactly what the
+        // manifests declare as host_permissions.
+        check(
+          permissionQueries.length === 1 &&
+            JSON.stringify(permissionQueries[0]) === JSON.stringify({
+              origins: ["https://boardgamegeek.com/*", "https://api.geekdo.com/*"]
+            }),
+          `popup asked for ${JSON.stringify(permissionQueries)}`
+        );
+
+        revokedNotice?.remove();
+        hostAccess.granted = true;
+        await rerunPopup();
+        check(
+          document.getElementById("host-access-notice") === null,
+          "popup showed the revocation notice while site access was granted"
+        );
+        check(permissionQueries.length === 2, "popup did not re-check site access on reopen");
+
         document.body.dataset.status = failures.length ? "fail" : "pass";
         document.body.dataset.report = JSON.stringify({
           failures,
           optionsStatus,
           popupState,
           popupNote,
-          innerHtmlWrites
+          innerHtmlWrites,
+          permissionQueries
         });
       }, 0);
     </script>

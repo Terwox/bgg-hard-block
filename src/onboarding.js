@@ -46,10 +46,49 @@
   const linking = document.getElementById("link-subscription-blocks");
   const status = document.getElementById("status");
 
+  // Firefox MV3 treats `host_permissions` as optional: they are shown at
+  // install, but the user can revoke them from about:addons at any time, so the
+  // extension can be consented-to and still unable to read BGG.
+  const origins = ["https://boardgamegeek.com/*", "https://api.geekdo.com/*"];
+  // Declared before the listener is registered so a click can never observe it
+  // in the temporal dead zone; resolved at page load, further down.
+  let hasHostAccess = true;
+
   agree.addEventListener("click", async () => {
     // Disable first: the storage write is async, and a double click would
     // otherwise record consent twice and re-trigger the tab refresh.
     agree.disabled = true;
+
+    // Gecko clears its user-input flag on the microtask after the listener
+    // returns, so nothing may be awaited before `permissions.request` — the
+    // access state was therefore resolved at page load, below. Chrome reaches
+    // the request branch only when the user has restricted site access ("On
+    // click" or "On specific sites" in the extension menu), which withholds the
+    // declared `host_permissions` so `contains` reports false; Chrome allows a
+    // withheld *declared* origin to be re-requested, and the gate then behaves
+    // exactly as it does on Firefox — request inside the gesture, fail closed if
+    // the answer is still no. The trailing `contains` closes the window where
+    // access was revoked between page load and click.
+    if (chrome.permissions?.contains) {
+      if (!hasHostAccess) {
+        try { await chrome.permissions.request({ origins }); } catch { /* not a grant */ }
+      }
+      try {
+        hasHostAccess = await chrome.permissions.contains({ origins });
+      } catch {
+        // A thrown check is not a grant; fail closed.
+        hasHostAccess = false;
+      }
+
+      if (!hasHostAccess) {
+        // Never leave a consent record the extension cannot act on.
+        status.textContent =
+          "BGG Hard Block needs access to boardgamegeek.com and api.geekdo.com. " +
+          "Grant it in your browser's add-on settings, then click again.";
+        agree.disabled = false;
+        return;
+      }
+    }
 
     // Consent and the linking choice are written together, so the extension can
     // never be active with an unrecorded preference. `grantedAt` exists so a
@@ -70,6 +109,16 @@
     status.textContent = "Enabled. Open BGG discussion tabs are refreshing now.";
     agree.textContent = "BGG Hard Block is enabled";
   });
+
+  // Resolved here, at page load, so the click handler can reach
+  // `permissions.request` without awaiting anything first.
+  if (chrome.permissions?.contains) {
+    try {
+      hasHostAccess = await chrome.permissions.contains({ origins });
+    } catch {
+      hasHostAccess = false;
+    }
+  }
 
   const stored = await chrome.storage.local.get([CONSENT_KEY, OPTIONS_KEY]);
 

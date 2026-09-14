@@ -61,15 +61,14 @@ versions placed in BGG-origin `localStorage`. It rejects and removes unversioned
 block-list state written by the former page-data bridge before using a cache.
 
 Reply drafts are processed only in the currently open BGG page. The extension
-does not store them in Chrome extension storage, BGG local storage, or anywhere
-else.
+does not store them in extension storage, BGG local storage, or anywhere else.
 
 The extension's filtering and BGG-data code is limited to canonical HTTPS URLs for those seven BGG
 discussion page families and the subscriptions feed. It does not activate filtering or credential capture
 on BGG's home page, game pages, collection, store, account pages, or any other
 site. After a single-page route leaves a supported page, a tiny local teardown
 function may run on the destination BGG page only to remove previously installed
-behavior; it reads no page data and makes no network request. Chrome treats
+behavior; it reads no page data and makes no network request. Browsers treat
 host permissions as origin-wide even when URL paths are declared. The canonical
 BoardGameGeek origin is used to identify and attach code only on supported
 pages. The canonical `api.geekdo.com` origin is used only for the
@@ -78,8 +77,8 @@ requests described below.
 
 The extension does not store the BGG `GeekAuth` authorization value. After
 current consent is verified, the background worker can observe it on an existing
-BGG-initiated request to `https://api.geekdo.com/api/*` through Chrome's read-only
-request event. The worker validates the active tab is a supported page and
+BGG-initiated request to `https://api.geekdo.com/api/*` through the browser's
+read-only request event. The worker validates the active tab is a supported page and
 rechecks stored consent for that event before reading the header, then binds the
 value to its exact document; an unused observation expires after five seconds.
 A document-bound MAIN-world capture remains as a private fallback. The
@@ -91,8 +90,8 @@ code.
 There is no declarative MAIN-world or settings bridge. The worker checks current
 consent and the subscription option before credential use, before network work,
 before each subscription addition, and before it saves or returns the public
-result. Usernames, custom-avatar identifiers, and status return only through Chrome extension messaging;
-there is no page-DOM data bridge. The only cross-world DOM event is a data-free,
+result. Usernames, custom-avatar identifiers, and status return only through
+extension messaging; there is no page-DOM data bridge. The only cross-world DOM event is a data-free,
 random-nonce-bound revocation signal
 when the page wrapper observes a native Hidden Users mutation. Its isolated
 relay can only ask the worker to pause optional subscription linking for that
@@ -119,13 +118,18 @@ Policy, including the Limited Use requirements. Data is used only for the
 extension's disclosed single purpose. It is not sold, transferred to third parties,
 used for advertising or credit decisions, or made available for human review.
 
+The extension also complies with Mozilla's Add-on Policies. Its Firefox manifest
+declares `browser_specific_settings.gecko.data_collection_permissions` as
+`{"required": ["none"]}`, which is the same statement in Mozilla's vocabulary:
+the extension collects no user data and transmits none to the developer.
+
 ## Retention and deletion
 
-Local extension data remains in the Chrome profile until Chrome clears it or the
-extension is removed. Cached BGG profile mappings older than 30 days are ignored
+Local extension data remains in the browser profile until the browser clears it
+or the extension is removed. Cached BGG profile mappings older than 30 days are ignored
 and removed by the next successful synchronization, which also prunes mappings
 to IDs in the current Hidden Users result. Removing the extension
-deletes its Chrome extension storage. Subscription blocks already written
+deletes its extension storage. Subscription blocks already written
 to the BGG account remain under the user's control in BGG's native subscription-
 block editor.
 

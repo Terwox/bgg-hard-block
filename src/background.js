@@ -15,6 +15,10 @@ const BRIDGE_MESSAGE_TYPE = "bgg-hard-blocker:initialize-bridge:v1";
 const STATUS_MESSAGE_TYPE = "bgg-hard-blocker:update-content-status:v1";
 const MUTATION_MESSAGE_TYPE = "bgg-hard-blocker:native-userblock-mutation:v1";
 const API_ORIGIN = "https://api.geekdo.com";
+// Exactly the `host_permissions` of both manifests: `permissions.contains` is
+// an all-or-nothing check, so an inexact list would answer a different question.
+const HOST_ORIGINS = ["https://boardgamegeek.com/*", "https://api.geekdo.com/*"];
+const HOST_PERMISSION_REASON = "host-permission-required";
 const API_ROOT = `${API_ORIGIN}/api`;
 const PROFILE_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const PROFILE_REQUEST_CONCURRENCY = 6;
@@ -86,6 +90,48 @@ function isDiscussionUrl(urlText) {
 
 function hasCurrentConsent(consent) {
   return consent?.granted === true && consent?.disclosureVersion === DISCLOSURE_VERSION;
+}
+
+// Chrome reports the origin that issued a web request as `details.initiator`,
+// a bare origin string such as "https://boardgamegeek.com", which `new URL`
+// parses like any other absolute URL. Gecko has no such field; it reports full
+// URLs in `originUrl` and `documentUrl`. Every candidate that is present is
+// checked: each one must parse and resolve to the BGG origin, a parse failure
+// or a mismatch refuses the request outright, and at least one candidate must
+// be present, so a request whose origin cannot be established is refused
+// rather than trusted.
+function requestOriginIsBgg(details) {
+  let sawCandidate = false;
+  for (const candidate of [details?.initiator, details?.originUrl, details?.documentUrl]) {
+    if (typeof candidate !== "string" || !candidate) continue;
+    sawCandidate = true;
+    try {
+      if (new URL(candidate).origin !== "https://boardgamegeek.com") return false;
+    } catch (_error) {
+      return false;
+    }
+  }
+  return sawCandidate;
+}
+
+// Chrome always populates `documentLifecycle`, so a prerendered or
+// back/forward-cached document is still rejected there. Gecko never reports
+// the field at all, and an absent field must not be read as a failed check:
+// the sender is additionally bound by extension id, top frame, document id,
+// origin, discussion URL, and the re-injection confirmation that follows.
+function senderDocumentIsActive(sender) {
+  return sender?.documentLifecycle === undefined || sender?.documentLifecycle === "active";
+}
+
+// Chrome exposes a tab's pending navigation target directly. Gecko has no
+// `pendingUrl` and needs no substitute here: its own in-progress load also
+// reports `status: "loading"`, which would reject every session started at
+// document_start. Staleness on Gecko is already carried by
+// `tabRouteRevisions` (bumped in `tabs.onUpdated`), the `tab.url !== sender.url`
+// comparison at each call site, and the documentId-bound `executeScript` that
+// follows.
+function tabIsNavigatingAway(tab) {
+  return typeof tab?.pendingUrl === "string" && tab.pendingUrl.length > 0;
 }
 
 function normalizeUserId(value) {
@@ -572,7 +618,7 @@ function clearObservedAuthorizations(tabId = null) {
 
 function observedAuthorization(details) {
   if (
-    details?.initiator !== "https://boardgamegeek.com" ||
+    !requestOriginIsBgg(details) ||
     !Number.isInteger(details?.tabId) ||
     details.tabId < 0 ||
     details?.frameId !== 0 ||
@@ -606,7 +652,7 @@ function observedAuthorization(details) {
       if (
         captureRevision !== authorizationRevision ||
         !hasCurrentConsent(stored?.[CONSENT_KEY]) ||
-        (typeof tab?.pendingUrl === "string" && tab.pendingUrl.length > 0) ||
+        tabIsNavigatingAway(tab) ||
         !isDiscussionUrl(tab?.url)
       ) {
         return;
@@ -695,7 +741,7 @@ function validContentStatusSender(message, sender) {
     /^[a-f0-9]{32}$/.test(String(message.channelNonce || "")) &&
     sender?.id === chrome.runtime.id && Number.isInteger(sender?.tab?.id) &&
     sender?.frameId === 0 && typeof sender?.documentId === "string" &&
-    sender.documentId.length > 0 && sender?.documentLifecycle === "active" &&
+    sender.documentId.length > 0 && senderDocumentIsActive(sender) &&
     sender?.origin === "https://boardgamegeek.com" && isDiscussionUrl(sender?.url));
 }
 
@@ -714,7 +760,7 @@ async function registerContentStatusSession(message, sender, routeRevision, auth
   if (startingRouteRevision !== routeRevision || authorizationRevision !== authRevision) return null;
   try {
     const tab = await chrome.tabs.get(tabId);
-    if ((typeof tab.pendingUrl === "string" && tab.pendingUrl.length > 0) ||
+    if (tabIsNavigatingAway(tab) ||
         tab.url !== sender.url || !isDiscussionUrl(tab.url)) return null;
     const stored = await chrome.storage.local.get(CONSENT_KEY);
     if (!hasCurrentConsent(stored?.[CONSENT_KEY]) ||
@@ -730,7 +776,7 @@ async function registerContentStatusSession(message, sender, routeRevision, auth
         confirmations[0]?.frameId !== 0 || confirmations[0]?.documentId !== sender.documentId ||
         confirmations[0]?.result !== true) return null;
     const currentTab = await chrome.tabs.get(tabId);
-    if ((typeof currentTab.pendingUrl === "string" && currentTab.pendingUrl.length > 0) ||
+    if (tabIsNavigatingAway(currentTab) ||
         currentTab.url !== sender.url || !isDiscussionUrl(currentTab.url) ||
         (tabRouteRevisions.get(tabId) || 0) !== routeRevision ||
         authorizationRevision !== authRevision) return null;
@@ -920,7 +966,7 @@ function validBridgeSender(message, sender) {
     /^[a-f0-9]{32}$/.test(String(message.channelNonce || "")) && sender?.id === chrome.runtime.id &&
     Number.isInteger(sender?.tab?.id) && sender?.frameId === 0 &&
     typeof sender?.documentId === "string" && sender.documentId.length > 0 &&
-    sender?.documentLifecycle === "active" && sender?.origin === "https://boardgamegeek.com" &&
+    senderDocumentIsActive(sender) && sender?.origin === "https://boardgamegeek.com" &&
     isDiscussionUrl(sender?.url));
 }
 
@@ -944,12 +990,27 @@ async function runBridgeSession(message, sender, generation, reservation) {
   try {
     const tab = await chrome.tabs.get(tabId);
     // A pending target or URL mismatch means this sender document is no longer the tab's exact page.
-    if ((typeof tab.pendingUrl === "string" && tab.pendingUrl.length > 0) ||
+    if (tabIsNavigatingAway(tab) ||
         tab.url !== sender.url || !isDiscussionUrl(tab.url)) {
       return { status: "error", reason: "stale-document" };
     }
     const initial = await readAuthorizationSnapshot();
     if (!hasCurrentConsent(initial.consent)) return { status: "error", reason: "consent-required" };
+    // Firefox MV3 treats `host_permissions` as optional: a user who agreed to
+    // the disclosure can still turn site access off in about:addons, and Chrome
+    // withholds the same origins when site access is restricted to "on click".
+    // Neither state can be repaired from here, so the session ends with a
+    // reason that names the cause instead of grinding into a generic
+    // "sync-failed" after a capture and a fetch that cannot succeed.
+    if (chrome.permissions?.contains) {
+      let hostAccess = true;
+      try {
+        hostAccess = await chrome.permissions.contains({ origins: HOST_ORIGINS });
+      } catch (_error) {
+        // A check that throws is not evidence of revocation; let the sync try.
+      }
+      if (!hostAccess) return { status: "error", reason: HOST_PERMISSION_REASON };
+    }
     const relayKey = `${tabId}:${documentId}`;
     if ((tabRouteRevisions.get(tabId) || 0) === startingRouteRevision &&
         authorizationRevision === startingAuthorizationRevision) {
@@ -1125,7 +1186,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === MUTATION_MESSAGE_TYPE) {
     const valid = sender?.id === chrome.runtime.id && Number.isInteger(sender?.tab?.id) &&
       sender?.frameId === 0 && typeof sender?.documentId === "string" &&
-      sender.documentId.length > 0 && sender?.documentLifecycle === "active" &&
+      sender.documentId.length > 0 && senderDocumentIsActive(sender) &&
       sender?.origin === "https://boardgamegeek.com" && isDiscussionUrl(sender?.url) &&
       /^[a-f0-9]{32}$/.test(String(message.channelNonce || "")) &&
       mutationRelaySessions.get(`${sender.tab.id}:${sender.documentId}`) === message.channelNonce;
@@ -1159,11 +1220,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-chrome.webRequest.onBeforeSendHeaders.addListener(
-  observedAuthorization,
-  { urls: [`${API_ROOT}/*`], types: ["xmlhttprequest"] },
-  ["requestHeaders", "extraHeaders"]
-);
+// `extraHeaders` is a Chrome-only extraInfoSpec value. Gecko validates this
+// argument against its own schema and throws synchronously on an unrecognised
+// member, which at this top level would abort the rest of the script and leave
+// the extension with no message, tab, or storage listeners at all. So ask the
+// browser first: the OnBeforeSendHeadersOptions enum is where it publishes the
+// extraInfoSpec vocabulary it accepts, and that enum is the mechanism here.
+//
+// No EXTRA_HEADERS member — a missing member, or no enum at all — means the
+// browser cannot honour the value, so requesting it would be the throw this
+// probe exists to avoid. Fail closed to `requestHeaders` only, which every
+// browser accepts. The membership test is `in`, not `hasOwn`, so a browser that
+// publishes the enum through a prototype is still read correctly.
+//
+// Observed in this extension's service worker on Chromium 149.0.7827.55: the
+// enum is {BLOCKING, EXTRA_HEADERS, REQUEST_HEADERS}, own properties, `in` true.
+const observedAuthorizationSpec = ["requestHeaders"];
+if ("EXTRA_HEADERS" in (chrome.webRequest?.OnBeforeSendHeadersOptions ?? {})) {
+  observedAuthorizationSpec.push("extraHeaders");
+}
+try {
+  chrome.webRequest.onBeforeSendHeaders.addListener(
+    observedAuthorization,
+    { urls: [`${API_ROOT}/*`], types: ["xmlhttprequest"] },
+    observedAuthorizationSpec
+  );
+} catch (_error) {
+  // Second layer only, never the mechanism: if registration still fails, the
+  // observed-header fallback is simply unavailable and the MAIN-world capture
+  // remains the primary path. Nothing is logged, because the rejected
+  // arguments name a request destination.
+}
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   let invalidated = false;

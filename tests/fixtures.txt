@@ -1,0 +1,26 @@
+# One browser fixture stem per line: scripts/browser_test.py runs tests/<stem>.html.
+# Read by scripts/test.sh (both browsers) and the Firefox job in
+# .github/workflows/ci.yml, so a new fixture is added in one place, not three.
+# Blank lines and # comments are skipped.
+dom-filter
+consent-gate
+onboarding
+page-bridge
+page-bridge-security
+subscription-linking-disabled
+subscription-avatar-runtime
+ui-deferred-status
+content-runtime
+mixed-version-runtime
+lazy-content-runtime
+cache-hold
+content-mutation-performance
+content-reveal-failure
+bridge-trust-runtime
+bridge-retry-runtime
+bridge-retry-exhausted
+bridge-retry-terminal
+content-large-thread-performance
+spa-scope-teardown
+css-failsafe
+live-angular-quote
