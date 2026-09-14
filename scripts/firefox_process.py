@@ -155,6 +155,10 @@ def launch_firefox(
 
     ``--no-remote --new-instance`` keep this out of any Firefox the developer
     already has open, and ``--remote-debugging-port 0`` asks for a free port.
+    ``--remote-allow-system-access`` is required from Firefox 155: without it
+    BiDi ``script.evaluate`` in a ``moz-extension://`` context (where the e2e
+    reads extension storage) is refused with "System access is required".
+    Firefox 153 and 154 accept the flag and did not need it.
     """
     write_user_js(profile_dir, proxy_port)
     process = subprocess.Popen(
@@ -163,6 +167,7 @@ def launch_firefox(
             "--headless",
             "--no-remote",
             "--new-instance",
+            "--remote-allow-system-access",
             "--profile",
             str(profile_dir),
             "--remote-debugging-port",
