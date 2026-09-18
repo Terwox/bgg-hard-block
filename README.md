@@ -3,10 +3,18 @@
 [![CI](https://github.com/terwox/bgg-hard-block/actions/workflows/ci.yml/badge.svg)](https://github.com/terwox/bgg-hard-block/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-BGG%20Hard%20Block-brightgreen)](https://chromewebstore.google.com/detail/bgg-hard-block/hkbnpeohgacliadddhjoddiickjnlnfl)
-[![Firefox Add-ons](https://img.shields.io/badge/Firefox%20Add--ons-listing%20pending-lightgrey)](https://addons.mozilla.org/firefox/addon/bgg-hard-block/)
+[![Firefox Add-ons](https://img.shields.io/badge/Firefox%20Add--ons-BGG%20Hard%20Block-brightgreen)](https://addons.mozilla.org/firefox/addon/bgg-hard-block/)
 
 A Manifest V3 (MV3) extension for Chrome and Firefox that turns BoardGameGeek's
 soft hide into a hard block on discussion pages.
+
+**Get it:** [**Chrome Web Store**](https://chromewebstore.google.com/detail/bgg-hard-block/hkbnpeohgacliadddhjoddiickjnlnfl)
+· [**Firefox Add-ons**](https://addons.mozilla.org/firefox/addon/bgg-hard-block/)
+— Firefox needs 153 or newer, desktop only.
+
+Free and GPL-3.0. There is no build step, no analytics, and no remote code: the
+files in [`src/`](src/) are the files that run in your browser, so you can
+[audit what you installed](#auditing-this-extension) against this repository.
 
 BGG's own block feature replaces a hidden user's post with a **Blocked User /
 Show Anyway** placeholder, and does nothing about quotations. If someone is
@@ -47,9 +55,7 @@ BoardGameGeek, LLC.
 
 Firefox 153 or newer, desktop only.
 
-**From addons.mozilla.org (AMO):** not published yet. The listing at
-[addons.mozilla.org/firefox/addon/bgg-hard-block](https://addons.mozilla.org/firefox/addon/bgg-hard-block/)
-returns 404 until AMO review completes.
+**From addons.mozilla.org (AMO):** [BGG Hard Block](https://addons.mozilla.org/firefox/addon/bgg-hard-block/)
 
 **From source, temporarily:**
 
@@ -301,8 +307,9 @@ destinations are out of bounds.
 ## v0.4.7
 
 - Adds Firefox support: a second checked-in manifest, a Gecko event-page
-  background, and Firefox test and packaging lanes. The addons.mozilla.org
-  (AMO) listing is still pending; the build requires Firefox 153 or newer.
+  background, and Firefox test and packaging lanes. This is the version
+  published to addons.mozilla.org (AMO); the build requires Firefox 153 or
+  newer.
 - Asks for host access from the consent screen when the browser has not already
   granted it, instead of assuming the permission is present.
 - Reports in the popup when site access is turned off, so a silent extension is
