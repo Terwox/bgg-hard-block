@@ -372,6 +372,10 @@ def main() -> int:
                 "--no-first-run",
                 "--remote-debugging-port=0",
                 f"--user-data-dir={profile_dir}",
+                # Branded Chrome ignores the two switches below without this;
+                # see the longer note in tests/consent_gate_e2e.py. Omitting it
+                # makes a smoke run silently report "nothing was blocked".
+                "--disable-features=DisableDisableExtensionsExceptCommandLineSwitch",
                 f"--disable-extensions-except={extension}",
                 f"--load-extension={extension}",
                 "about:blank",

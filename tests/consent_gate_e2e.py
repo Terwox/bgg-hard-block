@@ -250,12 +250,19 @@ class Cdp:
 async def find_target(port: int, predicate, timeout: float = 30) -> dict:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
+    seen: list[str] = []
     while loop.time() < deadline:
-        for target in http_json(f"http://127.0.0.1:{port}/json/list"):
+        targets = http_json(f"http://127.0.0.1:{port}/json/list")
+        for target in targets:
             if predicate(target):
                 return target
+        # Kept for the failure message: a bare "no target appeared" cannot
+        # distinguish "Chrome never started" from "Chrome started fine but the
+        # extension was never loaded", which is the difference between a hung
+        # runner and a switch Chrome decided to ignore.
+        seen = sorted({t.get("url", "") for t in targets})
         await asyncio.sleep(0.2)
-    raise TimeoutError("no matching CDP target appeared")
+    raise TimeoutError(f"no matching CDP target appeared; targets seen: {seen}")
 
 
 async def run(port: int, failures: list[str], report: dict, tab_first: bool) -> None:
@@ -419,6 +426,15 @@ def main() -> int:
                 "--mute-audio",
                 "--ignore-certificate-errors",
                 f"--host-resolver-rules={resolver_rules}",
+                # Google-Chrome-branded builds enable
+                # kDisableDisableExtensionsExceptCommandLineSwitch by default
+                # (extensions/common/extension_features.cc), which makes the two
+                # switches below no-ops: Chrome starts, CDP answers, and the
+                # extension is simply never loaded. Chrome for Testing and
+                # Chromium default it off, so this test passes locally against
+                # those and fails only on a branded Chrome such as the
+                # /usr/bin/google-chrome on GitHub's ubuntu-24.04 runner.
+                "--disable-features=DisableDisableExtensionsExceptCommandLineSwitch",
                 f"--disable-extensions-except={repo}",
                 f"--load-extension={repo}",
                 "--remote-debugging-port=0",

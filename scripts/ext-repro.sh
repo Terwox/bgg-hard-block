@@ -27,6 +27,7 @@ case "${1:-start}" in
     rm -rf "$profile"; mkdir -p "$profile"
     nohup "$chrome_bin" --headless=new --remote-debugging-port="$port" \
       --user-data-dir="$profile" \
+      --disable-features=DisableDisableExtensionsExceptCommandLineSwitch \
       --disable-extensions-except="$repo_dir" --load-extension="$repo_dir" \
       --no-first-run --no-default-browser-check --mute-audio \
       about:blank >"$profile/chrome.log" 2>&1 &
