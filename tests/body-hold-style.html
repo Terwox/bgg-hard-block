@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Body hold style test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <style>
+      body { margin: 0; }
+      #sticky-header { position: sticky; top: 0; height: 48px; background: #3f3a60; }
+      #hold-button { display: block; width: 240px; height: 64px; margin: 24px; }
+      #spacer { height: 2000px; }
+    </style>
+    <script>
+      // A cached list and no extension bridge: the cache settles but the bridge
+      // never does, so the hold lasts until the 500 ms post-load deadline.
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerConsent: {
+                  granted: true,
+                  disclosureVersion: "2026-08-15"
+                },
+                bggHardBlockerState: {
+                  schemaVersion: 3,
+                  usernames: ["Muted User"],
+                  avatarIds: [],
+                  status: { lastSync: "2026-08-04T00:00:00.000Z" }
+                }
+              };
+            },
+            async set() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <!-- Stands in for BGG's sticky gg-header (issue #1). -->
+    <header id="sticky-header">Header</header>
+    <button id="hold-button" type="button">Click target</button>
+    <div id="spacer"></div>
+    <script>
+      const header = document.getElementById("sticky-header");
+      const button = document.getElementById("hold-button");
+
+      function snapshot() {
+        const body = getComputedStyle(document.body);
+        const rect = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
+        );
+        return {
+          ready: document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
+          running: document.documentElement.hasAttribute("data-bgg-hard-blocker-running"),
+          opacity: body.opacity,
+          pointerEvents: body.pointerEvents,
+          visibility: body.visibility,
+          willChange: body.willChange,
+          animationName: body.animationName,
+          animations: document.body.getAnimations().length,
+          hitsButton: Boolean(hit && button.contains(hit)),
+          headerRect: JSON.stringify(header.getBoundingClientRect()),
+          buttonRect: JSON.stringify(rect)
+        };
+      }
+
+      let hold = null;
+      setTimeout(() => {
+        hold = snapshot();
+      }, 150);
+
+      const startedAt = performance.now();
+      const poll = setInterval(() => {
+        const timedOut = performance.now() - startedAt > 1500;
+        if (!hold || (!document.documentElement.hasAttribute("data-bgg-hard-blocker-ready") && !timedOut)) {
+          return;
+        }
+
+        clearInterval(poll);
+        const after = snapshot();
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(hold.running, "content script did not mark the page as running");
+        check(!hold.ready, "page was revealed before the hold snapshot");
+        check(hold.opacity === "0", `hold opacity is ${hold.opacity}, not 0`);
+        check(hold.pointerEvents === "none", `hold pointer-events is ${hold.pointerEvents}, not none`);
+        check(hold.visibility === "visible", `hold uses visibility ${hold.visibility}; the sticky header must lay out visible`);
+        check(hold.willChange === "auto", `hold will-change is ${hold.willChange}, not auto`);
+        check(!hold.hitsButton, "a click during the hold reaches the hidden page");
+
+        check(after.ready, "page was never revealed");
+        check(after.opacity === "1", `revealed opacity is ${after.opacity}, not 1`);
+        check(after.pointerEvents === "auto", `revealed pointer-events is ${after.pointerEvents}, not auto`);
+        check(after.visibility === "visible", `revealed visibility is ${after.visibility}`);
+        check(after.willChange === "auto", `revealed will-change is ${after.willChange}, not auto`);
+        check(after.animationName === "none", `revealed body still has animation ${after.animationName}`);
+        check(after.animations === 0, `revealed body still has ${after.animations} animation(s)`);
+        check(after.hitsButton, "the button is not clickable after reveal");
+        check(after.headerRect === hold.headerRect, "sticky header moved on reveal");
+        check(after.buttonRect === hold.buttonRect, "page content moved on reveal");
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, hold, after });
+      }, 10);
+    </script>
+  </body>
+</html>

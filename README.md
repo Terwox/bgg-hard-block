@@ -304,6 +304,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — the
 project's scope is deliberately narrow, and new permissions or network
 destinations are out of bounds.
 
+## v0.4.8
+
+- Holds the page with `opacity` and `pointer-events` instead of `visibility`
+  while the first filtering pass runs. BGG's sticky purple header could jitter
+  by a few pixels after reveal in Chrome on macOS when it was first laid out
+  under `visibility: hidden` (issue #1).
+- Leaves the disclosure text and its version unchanged, so existing users are
+  not re-prompted by this release.
+
 ## v0.4.7
 
 - Adds Firefox support: a second checked-in manifest, a Gecko event-page

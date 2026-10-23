@@ -50,7 +50,8 @@
         earlyState.quoteRemoved = !document.getElementById("cache-held-quote");
         earlyState.replyPresent = Boolean(document.getElementById("cache-held-reply"));
         earlyState.ready = document.documentElement.hasAttribute("data-bgg-hard-blocker-ready");
-        earlyState.visibility = getComputedStyle(document.body).visibility;
+        earlyState.opacity = getComputedStyle(document.body).opacity;
+        earlyState.pointerEvents = getComputedStyle(document.body).pointerEvents;
       }, 150);
 
       setTimeout(() => {
@@ -62,12 +63,16 @@
         check(earlyState.quoteRemoved, "cached list was not applied before render");
         check(earlyState.replyPresent, "allowed reply was removed");
         check(!earlyState.ready, "cached data revealed the page before the 500 ms ceiling");
-        check(earlyState.visibility === "hidden", "pre-render hold is not hiding the page");
+        check(earlyState.opacity === "0", "pre-render hold is not hiding the page");
+        check(earlyState.pointerEvents === "none", "pre-render hold leaves the page clickable");
         check(
           document.documentElement.hasAttribute("data-bgg-hard-blocker-ready"),
           "page remained hidden after the 500 ms post-load ceiling"
         );
-        check(getComputedStyle(document.body).visibility === "visible", "page is not visible after the ceiling");
+        const revealed = getComputedStyle(document.body);
+        check(revealed.opacity === "1", "page is not opaque after the ceiling");
+        check(revealed.pointerEvents === "auto", "page is not clickable after the ceiling");
+        check(revealed.visibility === "visible", "page is not visible after the ceiling");
 
         document.body.dataset.status = failures.length ? "fail" : "pass";
         document.body.dataset.report = JSON.stringify({ failures, earlyState });

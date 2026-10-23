@@ -47,8 +47,12 @@
         if (elapsed >= 400) {
           failures.push(`combined failure waited for the 500 ms deadline (${elapsed.toFixed(1)} ms)`);
         }
-        if (getComputedStyle(document.body).visibility !== "visible") {
+        const body = getComputedStyle(document.body);
+        if (body.opacity !== "1" || body.visibility !== "visible") {
           failures.push("page remained visually hidden after reveal");
+        }
+        if (body.pointerEvents !== "auto") {
+          failures.push("page remained unclickable after reveal");
         }
         document.body.dataset.status = failures.length ? "fail" : "pass";
         document.body.dataset.report = JSON.stringify({ failures, elapsed });

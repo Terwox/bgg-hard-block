@@ -20,12 +20,25 @@
 /*
  * 1. Hide until content.js signals it has filtered.
  *
- * `visibility: hidden` rather than `display: none` on purpose — the layout is
- * still computed, so images and fonts load normally and revealing the page does
- * not cause a reflow or a visible jump.
+ * Not `display: none`: the layout is still computed, so images and fonts load
+ * normally and revealing the page does not cause a reflow or a visible jump.
+ *
+ * `opacity` rather than `visibility: hidden`, because BGG's purple header is
+ * `position: sticky`, and a sticky header that gets its first layout and paint
+ * under `visibility: hidden` can jitter by a few pixels after reveal in Chrome
+ * on macOS (issue #1). `pointer-events: none` restores the click blocking that
+ * `visibility: hidden` gave for free: the invisible page cannot be clicked
+ * during the hold, apart from any descendant that sets `pointer-events` itself.
+ *
+ * Accepted trade-off: during the hold (page parsing plus at most 500 ms after
+ * DOMContentLoaded), the page stays in the accessibility tree, focusable, and
+ * reachable by find-in-page. A blocked post that is already in the DOM before
+ * the block list arrives is reachable that way too, until the filtering pass
+ * removes it from the DOM ahead of the reveal.
  */
 html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready]) body {
-  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 /*
@@ -37,10 +50,12 @@ html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready]) body {
  * has its own shorter deadline — is in charge.
  *
  * Implemented as a zero-duration animation with a 2s delay and `both` fill.
- * Before the delay, the backwards-filled first keyframe hides the body. After
- * the delay, the forwards-filled last keyframe reveals it. This separate rule
- * is essential: an animation cannot override the `!important` running-script
- * hold above.
+ * Before the delay, the backwards-filled first keyframe holds the body the same
+ * way rule 1 does (transparent and unclickable). After the delay, the
+ * forwards-filled last keyframe reveals it. `pointer-events` animates
+ * discretely, so the fill switches it in step with `opacity`. This separate
+ * rule is essential: an animation cannot override the `!important`
+ * running-script hold above.
  *
  * Consequence worth being honest about: in that failure mode the user briefly
  * sees an unfiltered page. A permanently blank BoardGameGeek is judged worse.
@@ -150,10 +165,12 @@ html[data-bgg-hard-blocker-running]
 
 @keyframes bgg-hard-blocker-failsafe {
   from {
-    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
   }
 
   to {
-    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
