@@ -24,4 +24,5 @@ content-large-thread-performance
 spa-scope-teardown
 css-failsafe
 body-hold-style
+top-layer-hold-style
 live-angular-quote

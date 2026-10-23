@@ -309,7 +309,12 @@ destinations are out of bounds.
 - Holds the page with `opacity` and `pointer-events` instead of `visibility`
   while the first filtering pass runs. BGG's sticky purple header could jitter
   by a few pixels after reveal in Chrome on macOS when it was first laid out
-  under `visibility: hidden` (issue #1).
+  under `visibility: hidden` (issue #1). The trade-off: during the hold (while
+  the page parses, plus at most 500 ms), keyboard focus and activation are no
+  longer blocked, so Tab and Enter can reach controls that are not yet visible.
+- Holds top-layer content separately: a modal dialog, a popover, or a
+  fullscreen element opened during the hold, and its backdrop. These paint
+  outside the page body, so the body's opacity does not cover them.
 - Leaves the disclosure text and its version unchanged, so existing users are
   not re-prompted by this release.
 

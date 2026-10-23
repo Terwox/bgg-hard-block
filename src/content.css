@@ -31,12 +31,50 @@
  * during the hold, apart from any descendant that sets `pointer-events` itself.
  *
  * Accepted trade-off: during the hold (page parsing plus at most 500 ms after
- * DOMContentLoaded), the page stays in the accessibility tree, focusable, and
- * reachable by find-in-page. A blocked post that is already in the DOM before
- * the block list arrives is reachable that way too, until the filtering pass
- * removes it from the DOM ahead of the reveal.
+ * DOMContentLoaded), the page stays in the accessibility tree and reachable by
+ * find-in-page, and keyboard input is not blocked. Elements can take focus, so
+ * `autofocus` and BGG's own `focus()` calls succeed, and Tab and Enter can
+ * reach and activate controls the user cannot yet see. A blocked post that is
+ * already in the DOM before the block list arrives is reachable that way too,
+ * until the filtering pass removes it from the DOM ahead of the reveal.
  */
 html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready]) body {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/*
+ * 1b. Hold top-layer content too.
+ *
+ * A modal `<dialog>`, a shown popover, a fullscreen element, and their
+ * `::backdrop` paint in the top layer, outside body's stacking context, so the
+ * body's group opacity does not reach them. (`visibility` is inherited, which
+ * is why the old rule hid them without saying so.) `pointer-events` is
+ * inherited and already reaches them through the DOM. It is repeated here so
+ * the hold does not depend on `::backdrop` inheriting from its element, which
+ * Chrome only does from version 122.
+ *
+ * Two rules, not one list, because one unsupported selector drops a whole
+ * list. Everything in the first rule predates the minimum browser versions in
+ * both manifests. `:popover-open` arrived in Chrome 114, after the manifest's
+ * minimum_chrome_version 111, so it gets its own rule: Chrome 111-113 drops
+ * that rule alone, and those versions have no Popover API to put an element in
+ * the top layer anyway. `::backdrop` stays outside `:is()`, which cannot take
+ * pseudo-elements.
+ *
+ * The failsafe (rule 2) needs no counterpart. A healthy content.js sets the
+ * running flag before any page script can open a dialog, and if it never
+ * starts, nothing is filtered and the failsafe reveals the unfiltered page
+ * anyway.
+ */
+html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready])
+  :is(dialog[open], :fullscreen),
+html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready]) ::backdrop {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready]) :popover-open {
   opacity: 0 !important;
   pointer-events: none !important;
 }

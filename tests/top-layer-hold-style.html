@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Top-layer hold style test</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <style>
+      body { margin: 0; }
+      dialog { width: 240px; height: 120px; padding: 0; }
+      #popover { width: 240px; height: 64px; margin: 0; top: 0; left: 0; }
+    </style>
+    <script>
+      // Same harness as body-hold-style: a cached list and no extension bridge,
+      // so the hold lasts until the 500 ms post-load deadline.
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get() {
+              return {
+                bggHardBlockerConsent: {
+                  granted: true,
+                  disclosureVersion: "2026-08-15"
+                },
+                bggHardBlockerState: {
+                  schemaVersion: 3,
+                  usernames: ["Muted User"],
+                  avatarIds: [],
+                  status: { lastSync: "2026-08-04T00:00:00.000Z" }
+                }
+              };
+            },
+            async set() {}
+          }
+        }
+      };
+    </script>
+    <script src="../src/content-core.js"></script>
+    <script src="../src/content.js"></script>
+  </head>
+  <body data-status="running">
+    <!--
+      Top-layer boxes paint outside body's stacking context, so the body's
+      opacity does not cover them. Each must be held on its own.
+    -->
+    <dialog id="modal"><button id="modal-button" type="button">Dialog</button></dialog>
+    <div id="popover" popover="manual">Popover</div>
+    <script>
+      const root = document.documentElement;
+      const modal = document.getElementById("modal");
+      const popover = document.getElementById("popover");
+
+      // Opened by page script while the content script is holding the page.
+      const openedDuringHold =
+        root.hasAttribute("data-bgg-hard-blocker-running") &&
+        !root.hasAttribute("data-bgg-hard-blocker-ready");
+      modal.showModal();
+      popover.showPopover();
+
+      function hitsElement(element) {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
+        );
+        return Boolean(hit && element.contains(hit));
+      }
+
+      function snapshot() {
+        const dialog = getComputedStyle(modal);
+        const backdrop = getComputedStyle(modal, "::backdrop");
+        const pop = getComputedStyle(popover);
+        return {
+          ready: root.hasAttribute("data-bgg-hard-blocker-ready"),
+          running: root.hasAttribute("data-bgg-hard-blocker-running"),
+          modal: modal.matches(":modal"),
+          popoverOpen: popover.matches(":popover-open"),
+          dialogOpacity: dialog.opacity,
+          dialogPointerEvents: dialog.pointerEvents,
+          dialogHit: hitsElement(modal),
+          backdropOpacity: backdrop.opacity,
+          backdropPointerEvents: backdrop.pointerEvents,
+          popoverOpacity: pop.opacity,
+          popoverPointerEvents: pop.pointerEvents
+        };
+      }
+
+      let hold = null;
+      setTimeout(() => {
+        hold = snapshot();
+      }, 150);
+
+      const startedAt = performance.now();
+      const poll = setInterval(() => {
+        const timedOut = performance.now() - startedAt > 1500;
+        if (!hold || (!root.hasAttribute("data-bgg-hard-blocker-ready") && !timedOut)) {
+          return;
+        }
+
+        clearInterval(poll);
+        const after = snapshot();
+        const failures = [];
+        const check = (condition, message) => {
+          if (!condition) failures.push(message);
+        };
+
+        check(openedDuringHold, "dialog and popover were not opened during the hold");
+        check(hold.running, "content script did not mark the page as running");
+        check(!hold.ready, "page was revealed before the hold snapshot");
+        check(hold.modal, "dialog is not modal, so it is not in the top layer");
+        check(hold.popoverOpen, "popover is not open, so it is not in the top layer");
+        check(hold.dialogOpacity === "0", `hold dialog opacity is ${hold.dialogOpacity}, not 0`);
+        check(hold.dialogPointerEvents === "none", `hold dialog pointer-events is ${hold.dialogPointerEvents}, not none`);
+        check(!hold.dialogHit, "a click during the hold reaches the hidden dialog");
+        check(hold.backdropOpacity === "0", `hold ::backdrop opacity is ${hold.backdropOpacity}, not 0`);
+        check(hold.backdropPointerEvents === "none", `hold ::backdrop pointer-events is ${hold.backdropPointerEvents}, not none`);
+        check(hold.popoverOpacity === "0", `hold popover opacity is ${hold.popoverOpacity}, not 0`);
+        check(hold.popoverPointerEvents === "none", `hold popover pointer-events is ${hold.popoverPointerEvents}, not none`);
+
+        check(after.ready, "page was never revealed");
+        check(after.modal && after.popoverOpen, "dialog or popover closed before the reveal snapshot");
+        check(after.dialogOpacity === "1", `revealed dialog opacity is ${after.dialogOpacity}, not 1`);
+        check(after.dialogPointerEvents === "auto", `revealed dialog pointer-events is ${after.dialogPointerEvents}, not auto`);
+        check(after.dialogHit, "the dialog is not clickable after reveal");
+        check(after.backdropOpacity === "1", `revealed ::backdrop opacity is ${after.backdropOpacity}, not 1`);
+        check(after.backdropPointerEvents === "auto", `revealed ::backdrop pointer-events is ${after.backdropPointerEvents}, not auto`);
+        check(after.popoverOpacity === "1", `revealed popover opacity is ${after.popoverOpacity}, not 1`);
+        check(after.popoverPointerEvents === "auto", `revealed popover pointer-events is ${after.popoverPointerEvents}, not auto`);
+
+        document.body.dataset.status = failures.length ? "fail" : "pass";
+        document.body.dataset.report = JSON.stringify({ failures, hold, after });
+      }, 10);
+    </script>
+  </body>
+</html>
