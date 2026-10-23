@@ -62,10 +62,12 @@ html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready]) body {
  * the top layer anyway. `::backdrop` stays outside `:is()`, which cannot take
  * pseudo-elements.
  *
- * The failsafe (rule 2) needs no counterpart. A healthy content.js sets the
- * running flag before any page script can open a dialog, and if it never
- * starts, nothing is filtered and the failsafe reveals the unfiltered page
- * anyway.
+ * The failsafe (rule 2) has no top-layer counterpart. Accepted gap: content.js
+ * sets the running flag only after its first storage read resolves, so for
+ * those few milliseconds the failsafe holds the body but these rules are not
+ * yet active, and a dialog opened by a page script in that window would show
+ * until the flag is set. If content.js never starts, nothing is filtered and
+ * the failsafe reveals the unfiltered page anyway.
  */
 html[data-bgg-hard-blocker-running]:not([data-bgg-hard-blocker-ready])
   :is(dialog[open], :fullscreen),
